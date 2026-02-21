@@ -272,7 +272,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             var config = _configService.GetConfig();
             var cachingEnabled = config.PromptCachingEnabled;
             List<Dictionary<string, object>>? tools = isAskMode
-                ? null
+                ? _toolRegistry?.BuildToolDefinitions(includeWriteTools: false, withCacheControl: cachingEnabled)
                 : _toolRegistry?.BuildToolDefinitions(withCacheControl: cachingEnabled);
             DiagLog($"[4/6] Sending to Claude API (mode: {mode}, messages: {messages.Count}, tools: {tools?.Count ?? 0}, context: {(_cachedContext != null ? "loaded" : "none")}, caching: {cachingEnabled})");
 
