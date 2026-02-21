@@ -263,17 +263,19 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
             _conversation!.AddUserMessage(messageText);
 
-            var systemPrompt = _promptBuilder!.BuildSystemPrompt(_cachedContext, _userRules);
+            var systemPrompt = _promptBuilder!.BuildSystemPromptParts(_cachedContext, _userRules);
             var messages = _conversation.BuildApiMessages();
 
-            var tools = _toolRegistry?.BuildToolDefinitions();
+            var tools = _toolRegistry?.BuildToolDefinitions(withCacheControl: true);
             DiagLog($"[4/6] Sending to Claude API (messages: {messages.Count}, tools: {tools?.Count ?? 0}, context: {(_cachedContext != null ? "loaded" : "none")})");
 
             // Tool use loop — Claude may request multiple rounds of tool calls before producing a final answer.
             // Each round: send conversation -> receive response -> execute tool calls -> append results -> repeat.
-            const int maxToolRounds = 5;
+            var maxToolRounds = _configService.GetConfig().MaxToolRounds;
             var totalInputTokens = 0;
             var totalOutputTokens = 0;
+            var totalCacheCreation = 0;
+            var totalCacheRead = 0;
             var modelWasModified = false;
 
             for (var round = 0; round < maxToolRounds; round++)
@@ -290,7 +292,9 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
                 totalInputTokens += response.InputTokens;
                 totalOutputTokens += response.OutputTokens;
-                DiagLog($"[5/6] Round {round + 1}: success={response.IsSuccess}, stop={response.StopReason}, text={response.FullText?.Length ?? 0}chars, tools={response.ToolCalls.Count}, tokens(in={response.InputTokens},out={response.OutputTokens},totalIn={totalInputTokens},totalOut={totalOutputTokens})");
+                totalCacheCreation += response.CacheCreationInputTokens;
+                totalCacheRead += response.CacheReadInputTokens;
+                DiagLog($"[5/6] Round {round + 1}: success={response.IsSuccess}, stop={response.StopReason}, text={response.FullText?.Length ?? 0}chars, tools={response.ToolCalls.Count}, tokens(in={response.InputTokens},out={response.OutputTokens},cacheWrite={response.CacheCreationInputTokens},cacheRead={response.CacheReadInputTokens},totalIn={totalInputTokens},totalOut={totalOutputTokens})");
 
                 if (!response.IsSuccess)
                 {
@@ -305,7 +309,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     if (!string.IsNullOrEmpty(response.FullText))
                         _conversation.AddAssistantMessage(response.FullText);
                     SendToWebView("chat_streaming", new { token = "", done = true });
-                    SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens });
+                    SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead });
                     if (modelWasModified) SendToWebView("model_changed", new { message = "Model was modified. Click ↻ to refresh context for future requests." });
                     return;
                 }
@@ -355,10 +359,10 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 messages = _conversation.BuildApiMessages();
             }
 
-            DiagLog($"[6/6] Max tool rounds (5) reached. Total tokens: in={totalInputTokens}, out={totalOutputTokens}");
-            SendToWebView("chat_streaming", new { token = "\n\n*[Reached maximum tool rounds. Break complex tasks into smaller steps.]*", done = false });
+            DiagLog($"[6/6] Max tool rounds ({maxToolRounds}) reached. Total tokens: in={totalInputTokens}, out={totalOutputTokens}, cacheWrite={totalCacheCreation}, cacheRead={totalCacheRead}");
+            SendToWebView("chat_streaming", new { token = "\n\n*[Reached maximum tool rounds (" + maxToolRounds + "). Break complex tasks into smaller steps.]*", done = false });
             SendToWebView("chat_streaming", new { token = "", done = true });
-            SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens });
+            SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead });
             if (modelWasModified) SendToWebView("model_changed", new { message = "Model was modified. Click ↻ to refresh context for future requests." });
         }
         catch (Exception ex)
@@ -412,7 +416,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             maxTokens = config.MaxTokens,
             theme = config.Theme,
             retryMaxAttempts = config.RetryMaxAttempts,
-            retryDelaySeconds = config.RetryDelaySeconds
+            retryDelaySeconds = config.RetryDelaySeconds,
+            maxToolRounds = config.MaxToolRounds
         });
     }
 
@@ -431,8 +436,11 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         int? retryDelaySeconds = null;
         if (data?["retryDelaySeconds"] != null)
             retryDelaySeconds = data["retryDelaySeconds"]!.GetValue<int>();
+        int? maxToolRounds = null;
+        if (data?["maxToolRounds"] != null)
+            maxToolRounds = data["maxToolRounds"]!.GetValue<int>();
 
-        _configService.SaveConfig(apiKey, model, depth, tokens, theme, retryMaxAttempts, retryDelaySeconds);
+        _configService.SaveConfig(apiKey, model, depth, tokens, theme, retryMaxAttempts, retryDelaySeconds, maxToolRounds);
         SendToWebView("settings_saved", new { success = true });
     }
 

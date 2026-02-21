@@ -32,4 +32,7 @@ public class AideLiteConfig
 
     [JsonPropertyName("retryDelaySeconds")]
     public int RetryDelaySeconds { get; set; } = 60;
+
+    [JsonPropertyName("maxToolRounds")]
+    public int MaxToolRounds { get; set; } = 10;
 }

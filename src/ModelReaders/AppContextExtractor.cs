@@ -62,17 +62,21 @@ public class AppContextExtractor
     }
 
     /// <summary>
-    /// Extract a detailed app context with full entity details and enriched microflow summaries.
-    /// More expensive than ExtractAppContext() but eliminates most read-only tool calls
-    /// by front-loading data into the cached system prompt.
+    /// Extract app context with detail level controlled by contextDepth:
+    ///   "full"    — all entity details, microflow activity sequences, associations (default)
+    ///   "summary" — module/entity/microflow names only, no attribute details or activity sequences (~5x smaller)
+    ///   "none"    — empty context, Claude uses tools for everything
     /// </summary>
     public AppContextDto ExtractDetailedAppContext(string contextDepth = "full", int maxEntitiesForDetails = 200)
     {
-        // Front-loads full entity details into the system prompt, eliminating most get_entity_details calls.
-        // maxEntitiesForDetails caps this to avoid token explosion on very large apps.
         var context = new AppContextDto { AppName = _model.Root.Name };
+
+        if (contextDepth == "none")
+            return context;
+
         var modules = _model.Root.GetModules();
         var totalEntityCount = 0;
+        var isSummary = contextDepth == "summary";
 
         foreach (var module in modules)
         {
@@ -87,17 +91,23 @@ public class AppContextExtractor
                 Name = module.Name,
                 FromAppStore = module.FromAppStore,
                 Entities = entities,
-                Associations = _domainModelReader.GetAssociationSummaries(module),
                 Pages = _pageReader.GetPageSummaries(module),
                 Enumerations = _domainModelReader.GetEnumerationSummaries(module)
             };
 
-            // Full entity details (only if total entity count is reasonable)
-            if (totalEntityCount <= maxEntitiesForDetails)
-                moduleSummary.EntityDetails = _domainModelReader.GetAllEntityDetails(module);
+            if (isSummary)
+            {
+                moduleSummary.Microflows = _microflowReader.GetMicroflowSummaries(module);
+            }
+            else
+            {
+                moduleSummary.Associations = _domainModelReader.GetAssociationSummaries(module);
 
-            // Enriched microflow summaries with params and activity types
-            moduleSummary.Microflows = _microflowReader.GetEnrichedMicroflowSummaries(module);
+                if (totalEntityCount <= maxEntitiesForDetails)
+                    moduleSummary.EntityDetails = _domainModelReader.GetAllEntityDetails(module);
+
+                moduleSummary.Microflows = _microflowReader.GetEnrichedMicroflowSummaries(module);
+            }
 
             context.Modules.Add(moduleSummary);
         }

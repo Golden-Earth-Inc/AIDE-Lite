@@ -8,9 +8,15 @@ using AideLite.Models.DTOs;
 
 namespace AideLite.Services;
 
+/// <summary>
+/// The two halves of the system prompt, split so the API layer can apply
+/// cache_control to each block independently.
+/// </summary>
+public record SystemPromptParts(string StaticInstructions, string AppContext);
+
 public class PromptBuilder
 {
-    private const string SystemPromptTemplate = @"You are AIDE Lite, an AI assistant inside Mendix Studio Pro 10.24 LTS.
+    private const string InstructionsTemplate = @"You are AIDE Lite, an AI assistant inside Mendix Studio Pro 10.24 LTS.
 
 CAPABILITIES:
 - Read the full app model (modules, entities, attributes, associations, microflows, pages, enumerations)
@@ -153,16 +159,12 @@ The full app model with entity attributes, types, associations, and microflow ac
 
 {BEST_PRACTICES}
 
-{USER_RULES}
+{USER_RULES}";
 
-{APP_CONTEXT}";
-
-    // Lazy-loaded from embedded resource — read once, cached for the process lifetime
     private static readonly Lazy<string> _bestPractices = new(LoadBestPractices);
 
     private static string LoadBestPractices()
     {
-        // Best practices are compiled as an embedded resource (see .csproj EmbeddedResource)
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = "AideLite.Resources.mendix-best-practices.md";
 
@@ -176,12 +178,12 @@ The full app model with entity attributes, types, associations, and microflow ac
 
     private const int MaxUserRulesLength = 4000;
 
-    public string BuildSystemPrompt(AppContextDto? appContext, string? userRules = null)
+    /// <summary>
+    /// Build system prompt as two separate blocks so the API layer can apply
+    /// prompt caching (cache_control) to each independently.
+    /// </summary>
+    public SystemPromptParts BuildSystemPromptParts(AppContextDto? appContext, string? userRules = null)
     {
-        var contextSection = appContext != null
-            ? appContext.ToDetailedCompactSummary()
-            : "No app context loaded. An app must be open in Studio Pro.";
-
         var userRulesSection = "";
         if (!string.IsNullOrWhiteSpace(userRules))
         {
@@ -194,9 +196,14 @@ The full app model with entity attributes, types, associations, and microflow ac
                 "--- END USER RULES ---";
         }
 
-        return SystemPromptTemplate
+        var staticInstructions = InstructionsTemplate
             .Replace("{BEST_PRACTICES}", _bestPractices.Value)
-            .Replace("{USER_RULES}", userRulesSection)
-            .Replace("{APP_CONTEXT}", contextSection);
+            .Replace("{USER_RULES}", userRulesSection);
+
+        var contextSection = appContext != null && appContext.Modules.Count > 0
+            ? appContext.ToDetailedCompactSummary()
+            : "No app context embedded. Use tools (get_modules, get_entities, etc.) to explore the model.";
+
+        return new SystemPromptParts(staticInstructions, contextSection);
     }
 }

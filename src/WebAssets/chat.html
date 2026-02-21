@@ -118,6 +118,11 @@
                 <small>Seconds to wait between retries (API retry-after header takes priority).</small>
             </div>
             <div class="form-group">
+                <label for="maxToolRoundsInput">Max Tool Rounds</label>
+                <input type="number" id="maxToolRoundsInput" value="10" min="1" max="50">
+                <small>Maximum number of tool-use rounds per message (1–50).</small>
+            </div>
+            <div class="form-group">
                 <label for="themeSelect">Theme</label>
                 <select id="themeSelect">
                     <option value="light">Light</option>
