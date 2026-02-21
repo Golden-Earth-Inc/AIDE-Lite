@@ -67,6 +67,7 @@ public class ConfigurationService
     private static readonly HashSet<string> AllowedModels = new(StringComparer.Ordinal)
     {
         "claude-sonnet-4-5-20250929",
+        "claude-sonnet-4-6",
         "claude-opus-4-6",
         "claude-haiku-4-5-20251001"
     };

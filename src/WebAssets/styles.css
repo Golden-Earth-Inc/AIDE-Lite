@@ -188,6 +188,37 @@ body {
 .status-dot.stale { background: #fd7e14; animation: pulse 1.5s infinite; }
 @keyframes pulse { 50% { opacity: 0.4; } }
 
+/* === Context Usage Bar === */
+.context-usage {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 12px;
+    flex-shrink: 0;
+}
+.context-usage-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--bg-surface);
+    overflow: hidden;
+}
+.context-usage-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: #22c55e;
+    transition: width 0.4s ease, background-color 0.4s ease;
+    width: 0%;
+}
+.context-usage-fill.warning { background: #f59e0b; }
+.context-usage-fill.danger { background: #ef4444; }
+.context-usage-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 /* === Chat Area === */
 .chat-area {
     flex: 1;

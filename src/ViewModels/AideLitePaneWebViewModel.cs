@@ -283,6 +283,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             var totalOutputTokens = 0;
             var totalCacheCreation = 0;
             var totalCacheRead = 0;
+            var lastRoundInputTokens = 0;
+            var lastRoundOutputTokens = 0;
             var modelWasModified = false;
 
             for (var round = 0; round < maxToolRounds; round++)
@@ -301,6 +303,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 totalOutputTokens += response.OutputTokens;
                 totalCacheCreation += response.CacheCreationInputTokens;
                 totalCacheRead += response.CacheReadInputTokens;
+                lastRoundInputTokens = response.InputTokens;
+                lastRoundOutputTokens = response.OutputTokens;
                 DiagLog($"[5/6] Round {round + 1}: success={response.IsSuccess}, stop={response.StopReason}, text={response.FullText?.Length ?? 0}chars, tools={response.ToolCalls.Count}, tokens(in={response.InputTokens},out={response.OutputTokens},cacheWrite={response.CacheCreationInputTokens},cacheRead={response.CacheReadInputTokens},totalIn={totalInputTokens},totalOut={totalOutputTokens})");
 
                 if (!response.IsSuccess)
@@ -316,7 +320,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     if (!string.IsNullOrEmpty(response.FullText))
                         _conversation.AddAssistantMessage(response.FullText);
                     SendToWebView("chat_streaming", new { token = "", done = true });
-                    SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead });
+                    SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead, contextUsedTokens = lastRoundInputTokens + lastRoundOutputTokens, contextLimitTokens = GetContextLimit(config.SelectedModel) });
                     if (modelWasModified) SendToWebView("model_changed", new { message = "Model was modified. Click ↻ to refresh context for future requests." });
                     return;
                 }
@@ -369,7 +373,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             DiagLog($"[6/6] Max tool rounds ({maxToolRounds}) reached. Total tokens: in={totalInputTokens}, out={totalOutputTokens}, cacheWrite={totalCacheCreation}, cacheRead={totalCacheRead}");
             SendToWebView("chat_streaming", new { token = "\n\n*[Reached maximum tool rounds (" + maxToolRounds + "). Break complex tasks into smaller steps.]*", done = false });
             SendToWebView("chat_streaming", new { token = "", done = true });
-            SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead });
+            SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead, contextUsedTokens = lastRoundInputTokens + lastRoundOutputTokens, contextLimitTokens = GetContextLimit(config.SelectedModel) });
             if (modelWasModified) SendToWebView("model_changed", new { message = "Model was modified. Click ↻ to refresh context for future requests." });
         }
         catch (Exception ex)
@@ -604,6 +608,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             _userRules = null;
         }
     }
+
+    private static int GetContextLimit(string model) => model switch
+    {
+        "claude-opus-4-6" => 200_000,
+        "claude-haiku-4-5-20251001" => 200_000,
+        _ => 200_000
+    };
 
     /// <summary>
     /// Clean up resources when the pane is closed.

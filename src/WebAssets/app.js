@@ -49,6 +49,9 @@
     var historyList = document.getElementById('historyList');
     var historyCloseBtn = document.getElementById('historyCloseBtn');
     var historyOverlay = document.getElementById('historyOverlay');
+    var contextUsage = document.getElementById('contextUsage');
+    var contextUsageFill = document.getElementById('contextUsageFill');
+    var contextUsageLabel = document.getElementById('contextUsageLabel');
     var exportBtn = document.getElementById('exportBtn');
     var exportModal = document.getElementById('exportModal');
     var exportDownloadBtn = document.getElementById('exportDownloadBtn');
@@ -363,6 +366,11 @@
         scrollToBottom();
 
         updateTokenBadge();
+
+        if (data.contextUsedTokens && data.contextLimitTokens) {
+            updateContextUsage(data.contextUsedTokens, data.contextLimitTokens);
+        }
+
         chatHistory.push({ type: 'tokens', content: 'Tokens: ' + formatTokens(inputTokens) + ' in, ' + formatTokens(outputTokens) + ' out, ' + formatTokens(total) + ' total' });
     }
 
@@ -381,6 +389,33 @@
         } else {
             badge.classList.add('hidden');
         }
+    }
+
+    function updateContextUsage(used, limit) {
+        if (!contextUsage || !contextUsageFill || !contextUsageLabel) return;
+        var pct = Math.min(Math.round((used / limit) * 100), 100);
+        contextUsageFill.style.width = pct + '%';
+
+        if (pct >= 80) {
+            contextUsageFill.className = 'context-usage-fill danger';
+        } else if (pct >= 50) {
+            contextUsageFill.className = 'context-usage-fill warning';
+        } else {
+            contextUsageFill.className = 'context-usage-fill';
+        }
+
+        contextUsageLabel.textContent = pct + '% (' + formatTokens(used) + ' / ' + formatTokens(limit) + ')';
+        contextUsage.classList.remove('hidden');
+    }
+
+    function resetContextUsage() {
+        if (!contextUsage) return;
+        contextUsage.classList.add('hidden');
+        if (contextUsageFill) {
+            contextUsageFill.style.width = '0%';
+            contextUsageFill.className = 'context-usage-fill';
+        }
+        if (contextUsageLabel) contextUsageLabel.textContent = '0%';
     }
 
     // --- Retry Wait (rate limit / overload automatic retry) ---
@@ -498,6 +533,7 @@
         cumulativeInputTokens = 0;
         cumulativeOutputTokens = 0;
         sendBtn.disabled = false;
+        resetContextUsage();
 
         var history = data.displayHistory;
         for (var i = 0; i < history.length; i++) {
@@ -601,6 +637,7 @@
     function updateModelBadge(model) {
         var labels = {
             'claude-sonnet-4-5-20250929': 'Sonnet 4.5',
+            'claude-sonnet-4-6': 'Sonnet 4.6',
             'claude-opus-4-6': 'Opus 4.6',
             'claude-haiku-4-5-20251001': 'Haiku 4.5'
         };
@@ -855,6 +892,7 @@
         cumulativeOutputTokens = 0;
         chatHistory = [];
         updateTokenBadge();
+        resetContextUsage();
         sendToBackend('new_chat');
     });
 
