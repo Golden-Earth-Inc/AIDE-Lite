@@ -3,6 +3,7 @@
 // Copyright (c) 2025-2026 Neel Desai / Golden Earth Software Consulting Inc.
 // Conversation history management — message building, trimming, and tool pairing
 // ============================================================================
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using AideLite.Models.Messages;
 
@@ -124,6 +125,66 @@ public class ConversationManager
     public void Clear()
     {
         _messages.Clear();
+    }
+
+    /// <summary>
+    /// Serialize all messages to a JSON string for persistence.
+    /// </summary>
+    public string SerializeMessages()
+    {
+        var apiMessages = new List<object>();
+        foreach (var msg in _messages)
+        {
+            apiMessages.Add(new
+            {
+                role = msg.Role,
+                content = msg.Content,
+                hasToolUse = msg.HasToolUse,
+                hasToolResult = msg.HasToolResult
+            });
+        }
+        return JsonSerializer.Serialize(apiMessages);
+    }
+
+    /// <summary>
+    /// Restore messages from a JSON string (previously saved with SerializeMessages).
+    /// Content is stored as JsonNode which serializes correctly for API calls.
+    /// </summary>
+    public void RestoreFromJson(string json)
+    {
+        _messages.Clear();
+        try
+        {
+            var nodes = JsonNode.Parse(json)?.AsArray();
+            if (nodes == null) return;
+
+            foreach (var node in nodes)
+            {
+                if (node == null) continue;
+                var role = node["role"]?.GetValue<string>() ?? "";
+                var contentNode = node["content"];
+                var hasToolUse = node["hasToolUse"]?.GetValue<bool>() ?? false;
+                var hasToolResult = node["hasToolResult"]?.GetValue<bool>() ?? false;
+
+                object content;
+                if (contentNode is JsonArray)
+                    content = contentNode.DeepClone();
+                else
+                    content = contentNode?.GetValue<string>() ?? "";
+
+                _messages.Add(new ChatMessage
+                {
+                    Role = role,
+                    Content = content,
+                    HasToolUse = hasToolUse,
+                    HasToolResult = hasToolResult
+                });
+            }
+        }
+        catch
+        {
+            _messages.Clear();
+        }
     }
 
     /// <summary>

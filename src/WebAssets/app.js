@@ -43,6 +43,11 @@
     var processingLabel = document.getElementById('processingLabel');
     var themeToggleBtn = document.getElementById('themeToggleBtn');
     var themeSelect = document.getElementById('themeSelect');
+    var historyBtn = document.getElementById('historyBtn');
+    var historyModal = document.getElementById('historyModal');
+    var historyList = document.getElementById('historyList');
+    var historyCloseBtn = document.getElementById('historyCloseBtn');
+    var historyOverlay = document.getElementById('historyOverlay');
     var exportBtn = document.getElementById('exportBtn');
     var exportModal = document.getElementById('exportModal');
     var exportDownloadBtn = document.getElementById('exportDownloadBtn');
@@ -102,6 +107,12 @@
                 break;
             case 'retry_wait':
                 handleRetryWait(data);
+                break;
+            case 'history_list':
+                handleHistoryList(data);
+                break;
+            case 'conversation_loaded':
+                handleConversationLoaded(data);
                 break;
             case 'error':
                 handleError(data);
@@ -227,6 +238,12 @@
         stopBtn.classList.add('hidden');
         hideToolActivity();
         hideProcessingBar();
+        autoSaveChatState();
+    }
+
+    function autoSaveChatState() {
+        if (chatHistory.length === 0) return;
+        sendToBackend('save_chat_state', { displayHistory: chatHistory });
     }
 
     // --- Processing Bar ---
@@ -393,6 +410,121 @@
         chatHistory.push({ type: 'error', content: msg });
     }
 
+    // --- History ---
+    function openHistory() {
+        historyModal.classList.remove('hidden');
+        sendToBackend('get_history');
+    }
+
+    function closeHistory() {
+        historyModal.classList.add('hidden');
+    }
+
+    function handleHistoryList(data) {
+        if (!data || !data.conversations) return;
+        var conversations = data.conversations;
+
+        if (conversations.length === 0) {
+            historyList.innerHTML = '<p class="history-empty">No saved conversations yet.</p>';
+            return;
+        }
+
+        var html = '';
+        for (var i = 0; i < conversations.length; i++) {
+            var conv = conversations[i];
+            var date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            });
+            var title = conv.title || 'Untitled';
+            if (title.length > 70) title = title.substring(0, 70) + '...';
+            var msgCount = conv.messageCount || 0;
+
+            html += '<div class="history-item" data-id="' + escapeHtml(conv.id) + '">';
+            html += '  <div class="history-item-main">';
+            html += '    <div class="history-item-title">' + escapeHtml(title) + '</div>';
+            html += '    <div class="history-item-meta">' + date + ' · ' + msgCount + ' messages</div>';
+            html += '  </div>';
+            html += '  <button class="history-delete-btn" data-id="' + escapeHtml(conv.id) + '" title="Delete">&#x2715;</button>';
+            html += '</div>';
+        }
+        historyList.innerHTML = html;
+
+        historyList.querySelectorAll('.history-item-main').forEach(function (el) {
+            el.addEventListener('click', function () {
+                var id = this.parentElement.getAttribute('data-id');
+                if (id) {
+                    closeHistory();
+                    sendToBackend('load_conversation', { id: id });
+                }
+            });
+        });
+
+        historyList.querySelectorAll('.history-delete-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var id = this.getAttribute('data-id');
+                if (id) {
+                    sendToBackend('delete_conversation', { id: id });
+                }
+            });
+        });
+    }
+
+    function handleConversationLoaded(data) {
+        if (!data || !data.displayHistory) return;
+
+        if (isStreaming) {
+            sendToBackend('cancel');
+            endStream();
+        }
+
+        chatArea.innerHTML = '';
+        chatHistory = [];
+        cumulativeInputTokens = 0;
+        cumulativeOutputTokens = 0;
+        sendBtn.disabled = false;
+
+        var history = data.displayHistory;
+        for (var i = 0; i < history.length; i++) {
+            var entry = history[i];
+            chatHistory.push(entry);
+
+            switch (entry.type) {
+                case 'user':
+                    appendMessage('user', entry.content);
+                    break;
+                case 'assistant':
+                    appendMessage('assistant', entry.content);
+                    break;
+                case 'tool_start':
+                    break;
+                case 'tool_result':
+                    break;
+                case 'success':
+                    var sdiv = document.createElement('div');
+                    sdiv.className = 'success-msg';
+                    sdiv.textContent = entry.content;
+                    chatArea.appendChild(sdiv);
+                    break;
+                case 'error':
+                    var ediv = document.createElement('div');
+                    ediv.className = 'error-msg';
+                    ediv.textContent = entry.content;
+                    chatArea.appendChild(ediv);
+                    break;
+                case 'tokens':
+                    var tdiv = document.createElement('div');
+                    tdiv.className = 'token-usage';
+                    tdiv.textContent = entry.content;
+                    chatArea.appendChild(tdiv);
+                    break;
+            }
+        }
+
+        scrollToBottom();
+        updateTokenBadge();
+    }
+
     // --- Settings ---
     function openSettings() {
         settingsModal.classList.remove('hidden');
@@ -411,6 +543,8 @@
         }
         if (data.contextDepth) document.getElementById('contextDepthSelect').value = data.contextDepth;
         if (data.maxTokens) document.getElementById('maxTokensInput').value = data.maxTokens;
+        if (data.retryMaxAttempts != null) document.getElementById('retryMaxAttemptsInput').value = data.retryMaxAttempts;
+        if (data.retryDelaySeconds != null) document.getElementById('retryDelaySecondsInput').value = data.retryDelaySeconds;
         if (data.hasKey) document.getElementById('apiKeyInput').placeholder = '********** (key saved)';
         if (data.theme) applyTheme(data.theme);
     }
@@ -426,11 +560,16 @@
         var tokens = parseInt(document.getElementById('maxTokensInput').value) || 8192;
         var theme = themeSelect ? themeSelect.value : currentTheme;
 
+        var retryMaxAttempts = parseInt(document.getElementById('retryMaxAttemptsInput').value) || 20;
+        var retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
+
         sendToBackend('save_settings', {
             apiKey: apiKey,
             selectedModel: model,
             contextDepth: depth,
             maxTokens: tokens,
+            retryMaxAttempts: retryMaxAttempts,
+            retryDelaySeconds: retryDelaySeconds,
             theme: theme
         });
 
@@ -542,20 +681,35 @@
     // --- Markdown Rendering ---
     // Lightweight regex-based Markdown-to-HTML converter. Handles code blocks,
     // inline formatting, headers, lists, tables, blockquotes, and links.
-    // Inline code content is HTML-escaped to prevent XSS.
+    // All text content is HTML-escaped before being wrapped in HTML tags to prevent XSS.
     function renderMarkdown(text) {
         if (!text) return '';
+
+        // Phase 1: Extract code blocks and inline code into placeholders so they survive escaping
+        var codeBlocks = [];
         var html = text;
 
-        // Code blocks (```lang\n...\n```)
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (m, lang, code) {
-            return '<pre><code class="language-' + (lang || '') + '">' + escapeHtml(code) + '</code></pre>';
+            var idx = codeBlocks.length;
+            codeBlocks.push('<pre><code class="language-' + (lang || '') + '">' + escapeHtml(code) + '</code></pre>');
+            return '\x00CODEBLOCK' + idx + '\x00';
         });
 
-        // Inline code (escape HTML inside backticks to prevent XSS)
         html = html.replace(/`([^`]+)`/g, function (m, code) {
-            return '<code>' + escapeHtml(code) + '</code>';
+            var idx = codeBlocks.length;
+            codeBlocks.push('<code>' + escapeHtml(code) + '</code>');
+            return '\x00CODEBLOCK' + idx + '\x00';
         });
+
+        // Phase 2: Escape all remaining text to prevent XSS
+        html = escapeHtml(html);
+
+        // Phase 3: Restore code block placeholders
+        html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, function (m, idx) {
+            return codeBlocks[parseInt(idx)] || '';
+        });
+
+        // Phase 4: Apply markdown formatting on escaped text (safe — all user content is escaped)
 
         // Bold
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -569,10 +723,10 @@
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
         // Blockquotes
-        html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+        html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
 
-        // Links [text](url)
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        // Links [text](url) — only allow http/https URLs
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
         // Unordered lists
         html = html.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
@@ -584,8 +738,7 @@
         html = html.replace(/((?:<li class="ol-item">[\s\S]*?<\/li>\s*)+)/g, '<ol>$1</ol>');
         html = html.replace(/<\/ol>\s*<ol>/g, '');
 
-        // Tables: rows before the |---|---| separator are headers (<th>), rows after are data (<td>).
-        // tableIsHeader flips to false when the separator line is encountered.
+        // Tables
         var tableIsHeader = true;
         html = html.replace(/^\|(.+)\|$/gm, function (match, content) {
             var cells = content.split('|').map(function (c) { return c.trim(); });
@@ -598,14 +751,12 @@
             return '<tr>' + row + '</tr>';
         });
         html = html.replace(/((<tr>[\s\S]*?<\/tr>\s*)+)/g, function (m) {
-            tableIsHeader = true; // Reset for next table
+            tableIsHeader = true;
             return '<table>' + m + '</table>';
         });
         html = html.replace(/<!-- table separator -->\s*/g, '');
 
-        // Paragraphs: wrap text in <p> tags using double-newline as a delimiter,
-        // then strip <p> wrappers that accidentally surround block-level elements
-        // (headers, pre, lists, tables, blockquotes).
+        // Paragraphs
         html = html.replace(/\n\n/g, '</p><p>');
         html = '<p>' + html + '</p>';
         html = html.replace(/<p>\s*<\/p>/g, '');
@@ -700,6 +851,11 @@
             applyTheme(this.value);
         });
     }
+
+    // History
+    if (historyBtn) historyBtn.addEventListener('click', openHistory);
+    if (historyCloseBtn) historyCloseBtn.addEventListener('click', closeHistory);
+    if (historyOverlay) historyOverlay.addEventListener('click', closeHistory);
 
     // Export chat
     if (exportBtn) exportBtn.addEventListener('click', openExport);

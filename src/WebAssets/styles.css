@@ -540,3 +540,67 @@ body.dark .success-msg { color: #86efac; }
     accent-color: #7c3aed;
     cursor: pointer;
 }
+
+/* === History Modal === */
+.history-dialog {
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+}
+.history-list {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+    margin: 8px 0 12px;
+}
+.history-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 24px 0;
+}
+.history-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    transition: background 0.15s;
+}
+.history-item:hover {
+    background: var(--bg-surface);
+}
+.history-item-main {
+    flex: 1;
+    cursor: pointer;
+    min-width: 0;
+}
+.history-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.history-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+.history-delete-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: color 0.15s, background 0.15s;
+}
+.history-delete-btn:hover {
+    color: #dc2626;
+    background: var(--bg-error);
+}

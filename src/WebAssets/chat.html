@@ -23,6 +23,7 @@
             </div>
             <div class="header-actions">
                 <button id="exportBtn" class="icon-btn" title="Export Chat">&#x2B07;</button>
+                <button id="historyBtn" class="icon-btn" title="Chat History">&#x1F4CB;</button>
                 <button id="themeToggleBtn" class="icon-btn" title="Toggle Dark Mode">&#x1F319;</button>
                 <button id="refreshBtn" class="icon-btn" title="Refresh App Context">&#x21bb;</button>
                 <button id="newChatBtn" class="icon-btn" title="New Chat">&#x2795;</button>
@@ -107,6 +108,16 @@
                 <input type="number" id="maxTokensInput" value="8192" min="256" max="128000">
             </div>
             <div class="form-group">
+                <label for="retryMaxAttemptsInput">Rate Limit Max Retries</label>
+                <input type="number" id="retryMaxAttemptsInput" value="20" min="0" max="100">
+                <small>How many times to retry on rate limit (0 = no retries).</small>
+            </div>
+            <div class="form-group">
+                <label for="retryDelaySecondsInput">Retry Delay (seconds)</label>
+                <input type="number" id="retryDelaySecondsInput" value="60" min="1" max="300">
+                <small>Seconds to wait between retries (API retry-after header takes priority).</small>
+            </div>
+            <div class="form-group">
                 <label for="themeSelect">Theme</label>
                 <select id="themeSelect">
                     <option value="light">Light</option>
@@ -116,6 +127,20 @@
             <div class="modal-actions">
                 <button id="saveSettingsBtn" class="primary-btn">Save</button>
                 <button id="cancelSettingsBtn" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Modal -->
+    <div id="historyModal" class="modal hidden">
+        <div class="modal-overlay" id="historyOverlay"></div>
+        <div class="modal-dialog history-dialog">
+            <h3>Chat History</h3>
+            <div id="historyList" class="history-list">
+                <p class="history-empty">No saved conversations yet.</p>
+            </div>
+            <div class="modal-actions">
+                <button id="historyCloseBtn" class="secondary-btn">Close</button>
             </div>
         </div>
     </div>

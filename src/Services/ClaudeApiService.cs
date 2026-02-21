@@ -24,8 +24,6 @@ public class ClaudeApiService
 
     private const string ApiUrl = "https://api.anthropic.com/v1/messages";
     private const string ApiVersion = "2023-06-01";
-    private const int MaxRetries = 3;
-    private static readonly int[] RetryDelaysSeconds = { 15, 30, 60 };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -54,7 +52,7 @@ public class ClaudeApiService
         List<Dictionary<string, object>>? tools,
         Action<string> onTextDelta,
         Action<string, string> onToolStart,
-        Action<int, int>? onRetryWait = null,
+        Action<int, int, int>? onRetryWait = null,
         CancellationToken externalToken = default)
     {
         _logService.Info("AIDE Lite: [API] Getting API key...");
@@ -91,7 +89,11 @@ public class ClaudeApiService
             var json = JsonSerializer.Serialize(requestBody, JsonOptions);
             _logService.Info($"AIDE Lite: [API] Request body size: {json.Length} chars");
 
-            for (var attempt = 0; attempt <= MaxRetries; attempt++)
+            var maxRetries = config.RetryMaxAttempts;
+            var retryDelay = config.RetryDelaySeconds;
+            _logService.Info($"AIDE Lite: [API] Retry config: maxAttempts={maxRetries}, delaySec={retryDelay}");
+
+            for (var attempt = 0; attempt <= maxRetries; attempt++)
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -103,7 +105,7 @@ public class ClaudeApiService
                 request.Headers.Add("anthropic-version", ApiVersion);
                 request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                _logService.Info($"AIDE Lite: [API] Sending HTTP request (attempt {attempt + 1}/{MaxRetries + 1})...");
+                _logService.Info($"AIDE Lite: [API] Sending HTTP request (attempt {attempt + 1}/{maxRetries + 1})...");
                 var response = await httpClient.SendAsync(request, ct);
                 _logService.Info($"AIDE Lite: [API] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
 
@@ -117,21 +119,21 @@ public class ClaudeApiService
                     if (statusCode == 401)
                         return ApiResponse.Error("Invalid API key. Please check your settings.", "auth_error");
 
-                    if (statusCode is 429 or 529 && attempt < MaxRetries)
+                    if (statusCode is 429 or 529 && attempt < maxRetries)
                     {
-                        var delaySec = GetRetryDelay(response, attempt);
+                        var delaySec = GetRetryDelay(response, retryDelay);
                         _logService.Info($"AIDE Lite: [API] Retryable error {statusCode}, waiting {delaySec}s before retry {attempt + 2}...");
-                        onRetryWait?.Invoke(attempt + 1, delaySec);
+                        onRetryWait?.Invoke(attempt + 1, delaySec, maxRetries);
                         await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
                         continue;
                     }
 
                     if (statusCode == 429)
-                        return ApiResponse.Error("Rate limit exceeded after multiple retries. Try switching to claude-haiku-4-5-20251001 in Settings for higher rate limits, or wait a minute.", "rate_limit");
+                        return ApiResponse.Error($"Rate limit exceeded after {maxRetries} retries. Try switching to claude-haiku-4-5-20251001 in Settings for higher rate limits, or increase retry settings.", "rate_limit");
                     if (statusCode == 529)
-                        return ApiResponse.Error("Claude API is overloaded after multiple retries. Please try again in a few minutes.", "overloaded");
+                        return ApiResponse.Error($"Claude API is overloaded after {maxRetries} retries. Please try again in a few minutes.", "overloaded");
 
-                    return ApiResponse.Error($"API error ({statusCode}): {errorBody}");
+                    return ApiResponse.Error($"API error ({statusCode}). Check the AIDE Lite log for details.");
                 }
 
                 _logService.Info("AIDE Lite: [API] Parsing streaming response...");
@@ -149,12 +151,12 @@ public class ClaudeApiService
         catch (HttpRequestException ex)
         {
             _logService.Error($"AIDE Lite: Network error: {ex.Message}");
-            return ApiResponse.Error($"Network error: {ex.Message}", "network");
+            return ApiResponse.Error("Network error. Please check your connection.", "network");
         }
         catch (Exception ex)
         {
             _logService.Error($"AIDE Lite: Unexpected error: {ex.Message}");
-            return ApiResponse.Error($"Unexpected error: {ex.Message}");
+            return ApiResponse.Error("An unexpected error occurred. Check the AIDE Lite log for details.");
         }
         finally
         {
@@ -165,23 +167,26 @@ public class ClaudeApiService
 
     /// <summary>
     /// Determines how long to wait before retrying, using the Retry-After header if available,
-    /// otherwise falling back to a predefined exponential backoff schedule.
+    /// otherwise falling back to the user-configured delay.
     /// </summary>
-    private static int GetRetryDelay(HttpResponseMessage response, int attempt)
+    private static int GetRetryDelay(HttpResponseMessage response, int configuredDelay)
     {
         if (response.Headers.TryGetValues("retry-after", out var values))
         {
             var retryAfter = values.FirstOrDefault();
             if (int.TryParse(retryAfter, out var headerSeconds) && headerSeconds > 0)
-                return Math.Min(headerSeconds, 120);
+                return Math.Min(headerSeconds, 300);
         }
-        return attempt < RetryDelaysSeconds.Length ? RetryDelaysSeconds[attempt] : 60;
+        return configuredDelay;
     }
 
     public void Cancel()
     {
         _currentCts?.Cancel();
     }
+
+    private const int MaxStreamTextBytes = 2 * 1024 * 1024; // 2 MB cap on accumulated response text
+    private const int MaxToolInputJsonBytes = 512 * 1024;  // 512 KB cap on a single tool_use input
 
     private async Task<ApiResponse> ParseStreamingResponse(
         HttpResponseMessage response,
@@ -190,8 +195,6 @@ public class ClaudeApiService
         CancellationToken ct)
     {
         var result = new ApiResponse();
-        // SSE event types: content_block_start/delta/stop, message_start/delta/stop, ping, error
-        // Tool input arrives as incremental JSON fragments across multiple input_json_delta events
         var currentToolUseId = "";
         var currentToolName = "";
         var toolInputJson = new StringBuilder();
@@ -239,12 +242,28 @@ public class ClaudeApiService
                         if (deltaType == "text_delta")
                         {
                             var text = delta?["text"]?.GetValue<string>() ?? "";
+                            if (fullText.Length + text.Length > MaxStreamTextBytes)
+                            {
+                                result.ErrorMessage = "Response exceeded maximum size limit.";
+                                result.ErrorCode = "stream_too_large";
+                                result.FullText = fullText.ToString();
+                                result.IsSuccess = false;
+                                return result;
+                            }
                             fullText.Append(text);
                             onTextDelta(text);
                         }
                         else if (deltaType == "input_json_delta")
                         {
                             var partialJson = delta?["partial_json"]?.GetValue<string>() ?? "";
+                            if (toolInputJson.Length + partialJson.Length > MaxToolInputJsonBytes)
+                            {
+                                result.ErrorMessage = "Tool input exceeded maximum size limit.";
+                                result.ErrorCode = "stream_too_large";
+                                result.FullText = fullText.ToString();
+                                result.IsSuccess = false;
+                                return result;
+                            }
                             toolInputJson.Append(partialJson);
                         }
                         break;

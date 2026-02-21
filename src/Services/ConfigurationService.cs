@@ -64,24 +64,44 @@ public class ConfigurationService
 
     public bool HasApiKey() => !string.IsNullOrEmpty(GetConfig().EncryptedApiKey);
 
-    public void SaveConfig(string? apiKey, string? selectedModel, string? contextDepth, int? maxTokens, string? theme = null)
+    private static readonly HashSet<string> AllowedModels = new(StringComparer.Ordinal)
+    {
+        "claude-sonnet-4-5-20250929",
+        "claude-opus-4-6",
+        "claude-haiku-4-5-20251001"
+    };
+
+    private static readonly HashSet<string> AllowedContextDepths = new(StringComparer.Ordinal)
+    {
+        "full", "summary", "none"
+    };
+
+    private const int MaxTokensCeiling = 64000;
+
+    public void SaveConfig(string? apiKey, string? selectedModel, string? contextDepth, int? maxTokens, string? theme = null, int? retryMaxAttempts = null, int? retryDelaySeconds = null)
     {
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
             _cachedConfig.EncryptedApiKey = EncryptApiKey(apiKey);
         }
 
-        if (!string.IsNullOrEmpty(selectedModel))
+        if (!string.IsNullOrEmpty(selectedModel) && AllowedModels.Contains(selectedModel))
             _cachedConfig.SelectedModel = selectedModel;
 
-        if (!string.IsNullOrEmpty(contextDepth))
+        if (!string.IsNullOrEmpty(contextDepth) && AllowedContextDepths.Contains(contextDepth))
             _cachedConfig.ContextDepth = contextDepth;
 
         if (maxTokens.HasValue && maxTokens.Value >= 256)
-            _cachedConfig.MaxTokens = maxTokens.Value;
+            _cachedConfig.MaxTokens = Math.Min(maxTokens.Value, MaxTokensCeiling);
 
         if (theme is "light" or "dark")
             _cachedConfig.Theme = theme;
+
+        if (retryMaxAttempts.HasValue && retryMaxAttempts.Value >= 0)
+            _cachedConfig.RetryMaxAttempts = Math.Min(retryMaxAttempts.Value, 100);
+
+        if (retryDelaySeconds.HasValue && retryDelaySeconds.Value >= 1)
+            _cachedConfig.RetryDelaySeconds = Math.Min(retryDelaySeconds.Value, 600);
 
         SaveToDisk(_cachedConfig);
         _logService.Info("AIDE Lite: Configuration saved");
