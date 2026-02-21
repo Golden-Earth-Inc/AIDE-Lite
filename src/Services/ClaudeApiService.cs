@@ -92,12 +92,16 @@ public class ClaudeApiService
         }
         finally
         {
-            _currentCts?.Dispose();
-            _currentCts = null;
+            var cts = Interlocked.Exchange(ref _currentCts, null);
+            cts?.Dispose();
         }
     }
 
-    public void Cancel() => _currentCts?.Cancel();
+    public void Cancel()
+    {
+        try { _currentCts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
 
     // ── Request building ────────────────────────────────────────────────
 
@@ -179,13 +183,15 @@ public class ClaudeApiService
             if (!IsRetryableStatus(statusCode) || attempt >= maxRetries)
                 return FinalErrorForStatus(statusCode, maxRetries);
 
-            var delaySec = GetRetryDelay(response, retryDelay);
+            var delaySec = GetRetryDelay(response, retryDelay, attempt);
             _logService.Info($"AIDE Lite: [API] Retryable {statusCode}, waiting {delaySec}s...");
             onRetryWait?.Invoke(attempt + 1, delaySec, maxRetries);
             await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
         }
 
-        return ApiResponse.Error("Rate limit exceeded after maximum retries.", "rate_limit");
+        // Unreachable for valid maxRetries (>=0) — the loop always returns via FinalErrorForStatus
+        // on its last iteration. Required by the compiler for the maxRetries < 0 edge case.
+        return FinalErrorForStatus(0, maxRetries);
     }
 
     private static HttpRequestMessage CreateHttpRequest(string apiKey, string json, bool cachingEnabled)
@@ -193,8 +199,7 @@ public class ClaudeApiService
         var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
         request.Headers.Add("x-api-key", apiKey);
         request.Headers.Add("anthropic-version", ApiVersion);
-        if (cachingEnabled)
-            request.Headers.Add("anthropic-beta", "prompt-caching-2024-07-31");
+        // Prompt caching is GA — no beta header needed (cache_control in body is sufficient)
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         return request;
     }
@@ -209,7 +214,7 @@ public class ClaudeApiService
         return ApiResponse.Error($"API error ({statusCode}). Check the AIDE Lite log for details.");
     }
 
-    private static int GetRetryDelay(HttpResponseMessage response, int configuredDelay)
+    private static int GetRetryDelay(HttpResponseMessage response, int configuredDelay, int attempt)
     {
         if (response.Headers.TryGetValues("retry-after", out var values))
         {
@@ -217,7 +222,10 @@ public class ClaudeApiService
             if (int.TryParse(retryAfter, out var headerSeconds) && headerSeconds > 0)
                 return Math.Min(headerSeconds, 300);
         }
-        return configuredDelay;
+        // Exponential backoff with jitter when no retry-after header
+        var exponentialDelay = configuredDelay * Math.Pow(2, attempt);
+        var jitter = Random.Shared.NextDouble() * 0.3 * exponentialDelay;
+        return (int)Math.Min(exponentialDelay + jitter, 300);
     }
 
     // ── SSE stream parsing ──────────────────────────────────────────────
@@ -388,9 +396,14 @@ public class ClaudeApiService
 
     private static ApiResponse? OnError(JsonNode evt, StreamState s)
     {
-        s.Result.ErrorMessage = evt["error"]?["message"]?.GetValue<string>() ?? "Unknown streaming error";
-        s.Result.ErrorCode = "stream_error";
-        return null;
+        var msg = evt["error"]?["message"]?.GetValue<string>() ?? "Unknown streaming error";
+        return new ApiResponse
+        {
+            IsSuccess = false,
+            ErrorMessage = msg,
+            ErrorCode = "stream_error",
+            FullText = s.FullText.ToString()
+        };
     }
 
     private static ApiResponse SizeLimitError(string message, StreamState s) => new()

@@ -74,7 +74,7 @@ public class ConfigurationService
 
     private static readonly HashSet<string> AllowedContextDepths = new(StringComparer.Ordinal)
     {
-        "full", "summary", "none"
+        "full", "module", "summary", "none"
     };
 
     private const int MaxTokensCeiling = 64000;

@@ -20,12 +20,20 @@ public class ToolExecutor
         _logService = logService;
     }
 
-    public ToolResult Execute(string toolName, string inputJson)
+    public ToolResult Execute(string toolName, string inputJson, bool isAskMode = false)
     {
         var tool = _registry.GetTool(toolName);
         if (tool == null)
         {
             return ToolResult.Fail($"Unknown tool: {toolName}");
+        }
+
+        // Defense-in-depth: reject write tools at execution time when in Ask mode,
+        // even though they should already be excluded from the API tool definitions.
+        if (isAskMode && tool.IsWriteTool)
+        {
+            _logService.Info($"AIDE Lite: BLOCKED write tool '{toolName}' in Ask mode");
+            return ToolResult.Fail($"Tool '{toolName}' is not available in Ask mode. Switch to Agent mode to make changes.");
         }
 
         try

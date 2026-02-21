@@ -3,6 +3,9 @@
 // Copyright (c) 2025-2026 Neel Desai / Golden Earth Software Consulting Inc.
 // Conversation history persistence — save/load chat sessions to disk
 // ============================================================================
+using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -10,6 +13,7 @@ using Mendix.StudioPro.ExtensionsAPI.Services;
 
 namespace AideLite.Services;
 
+[SupportedOSPlatform("windows")]
 public partial class ConversationHistoryService
 {
     private readonly ILogService _logService;
@@ -41,6 +45,21 @@ public partial class ConversationHistoryService
         Directory.CreateDirectory(_historyDir);
     }
 
+    // DPAPI encryption for conversation history — same entropy as API key storage
+    private static readonly byte[] DpapiEntropy = "AideLite-ConversationHistory-2026"u8.ToArray();
+
+    private static byte[] EncryptData(string plainText)
+    {
+        var bytes = Encoding.UTF8.GetBytes(plainText);
+        return ProtectedData.Protect(bytes, DpapiEntropy, DataProtectionScope.CurrentUser);
+    }
+
+    private static string DecryptData(byte[] encrypted)
+    {
+        var decrypted = ProtectedData.Unprotect(encrypted, DpapiEntropy, DataProtectionScope.CurrentUser);
+        return Encoding.UTF8.GetString(decrypted);
+    }
+
     public void SaveConversation(SavedConversation conversation)
     {
         try
@@ -49,12 +68,33 @@ public partial class ConversationHistoryService
             if (filePath == null) return;
             conversation.UpdatedAt = DateTime.UtcNow;
             var json = JsonSerializer.Serialize(conversation, JsonOptions);
-            File.WriteAllText(filePath, json);
+            var encrypted = EncryptData(json);
+            var tempPath = filePath + ".tmp";
+            File.WriteAllBytes(tempPath, encrypted);
+            File.Move(tempPath, filePath, overwrite: true);
             PruneOldConversations();
         }
         catch (Exception ex)
         {
             _logService.Error($"AIDE Lite: Failed to save conversation: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Read a conversation file with backward-compatible decryption.
+    /// Tries DPAPI decryption first; falls back to plaintext for pre-encryption files.
+    /// </summary>
+    private static string? ReadConversationFile(string filePath)
+    {
+        var bytes = File.ReadAllBytes(filePath);
+        try
+        {
+            return DecryptData(bytes);
+        }
+        catch (CryptographicException)
+        {
+            // Pre-encryption plaintext file — read as UTF-8
+            return Encoding.UTF8.GetString(bytes);
         }
     }
 
@@ -67,7 +107,8 @@ public partial class ConversationHistoryService
             {
                 try
                 {
-                    var json = File.ReadAllText(file);
+                    var json = ReadConversationFile(file);
+                    if (json == null) continue;
                     var conv = JsonSerializer.Deserialize<SavedConversation>(json, JsonOptions);
                     if (conv != null)
                     {
@@ -98,7 +139,8 @@ public partial class ConversationHistoryService
         {
             var filePath = SafeFilePath(id);
             if (filePath == null || !File.Exists(filePath)) return null;
-            var json = File.ReadAllText(filePath);
+            var json = ReadConversationFile(filePath);
+            if (json == null) return null;
             return JsonSerializer.Deserialize<SavedConversation>(json, JsonOptions);
         }
         catch (Exception ex)

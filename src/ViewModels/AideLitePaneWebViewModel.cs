@@ -51,6 +51,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     private ConversationHistoryService? _historyService;
     private string? _currentConversationId;
     private string? _currentConversationTitle;
+    private DateTime _lastSettingsSave = DateTime.MinValue;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -261,7 +262,9 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             }
             DiagLog("[3/6] Services initialized");
 
-            var mode = data?["mode"]?.GetValue<string>() ?? "agent";
+            var rawMode = data?["mode"]?.GetValue<string>();
+            // Validate mode server-side — default to "ask" (least permissive) for unknown values
+            var mode = rawMode is "agent" or "ask" ? rawMode : "ask";
             var isAskMode = mode == "ask";
 
             _conversation!.AddUserMessage(messageText);
@@ -332,7 +335,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 var toolResults = new List<(string ToolUseId, string Content, bool IsError)>();
                 foreach (var toolCall in response.ToolCalls)
                 {
-                    var toolResult = _toolExecutor!.Execute(toolCall.Name, toolCall.InputJson);
+                    var toolResult = _toolExecutor!.Execute(toolCall.Name, toolCall.InputJson, isAskMode);
                     SendToWebView("tool_result", new
                     {
                         toolName = toolCall.Name,
@@ -435,6 +438,14 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
     private void HandleSaveSettings(JsonObject? data)
     {
+        // Rate-limit settings saves to prevent file contention from rapid clicks
+        if ((DateTime.UtcNow - _lastSettingsSave).TotalSeconds < 2)
+        {
+            DiagLog("HandleSaveSettings: throttled (< 2s since last save)");
+            return;
+        }
+        _lastSettingsSave = DateTime.UtcNow;
+
         var apiKey = data?["apiKey"]?.GetValue<string>();
         var model = data?["selectedModel"]?.GetValue<string>();
         var depth = data?["contextDepth"]?.GetValue<string>();
@@ -486,6 +497,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     {
         var id = data?["id"]?.GetValue<string>();
         if (string.IsNullOrEmpty(id)) return;
+
+        // Cancel any in-flight request before switching conversations
+        if (_isChatProcessing)
+        {
+            _claudeApi?.Cancel();
+            _isChatProcessing = false;
+        }
 
         EnsureServicesInitialized();
         var conversation = _historyService!.LoadConversation(id);
@@ -548,15 +566,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 }
             }
 
-            var isNew = !File.Exists(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "AideLite", "history", $"{_currentConversationId}.json"));
+            var existing = _historyService.LoadConversation(_currentConversationId);
 
             _historyService.SaveConversation(new SavedConversation
             {
                 Id = _currentConversationId,
                 Title = _currentConversationTitle ?? "Untitled",
-                CreatedAt = isNew ? DateTime.UtcNow : DateTime.UtcNow,
+                CreatedAt = existing?.CreatedAt ?? DateTime.UtcNow,
                 DisplayHistory = displayHistory,
                 ApiMessagesJson = _conversation.SerializeMessages()
             });
@@ -609,12 +625,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         }
     }
 
-    private static int GetContextLimit(string model) => model switch
-    {
-        "claude-opus-4-6" => 200_000,
-        "claude-haiku-4-5-20251001" => 200_000,
-        _ => 200_000
-    };
+    // All currently-supported Claude models have 200K context windows
+    private static int GetContextLimit(string model) => 200_000;
 
     /// <summary>
     /// Clean up resources when the pane is closed.
@@ -622,8 +634,11 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     internal void Cleanup()
     {
         _claudeApi?.Cancel();
+        _isChatProcessing = false;
         _conversation?.Clear();
         _cachedContext = null;
+        _currentConversationId = null;
+        _currentConversationTitle = null;
         if (_webView != null)
         {
             _webView.MessageReceived -= OnMessageReceived;

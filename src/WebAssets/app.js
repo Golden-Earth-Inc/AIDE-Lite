@@ -215,6 +215,9 @@
             ]).then(function () {
                 btn.textContent = '\u2713';
                 setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
+            }).catch(function () {
+                btn.textContent = '!';
+                setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
             });
         });
         div.appendChild(btn);
@@ -414,24 +417,36 @@
         cumulativeOutputTokens += outputTokens;
 
         var total = inputTokens + outputTokens;
-        var parts = [
-            '<span class="token-label">Tokens:</span>',
-            '<span class="token-in">' + formatTokens(inputTokens) + ' in</span>',
-            '<span class="token-out">' + formatTokens(outputTokens) + ' out</span>',
-            '<span class="token-total">' + formatTokens(total) + ' total</span>'
-        ];
 
-        if (cacheCreation > 0 || cacheRead > 0) {
-            parts.push('<span class="token-cache">Cache: ' +
-                (cacheRead > 0 ? formatTokens(cacheRead) + ' hit' : '') +
-                (cacheRead > 0 && cacheCreation > 0 ? ', ' : '') +
-                (cacheCreation > 0 ? formatTokens(cacheCreation) + ' written' : '') +
-                '</span>');
+        function makeSpan(cls, text) {
+            var s = document.createElement('span');
+            s.className = cls;
+            s.textContent = text;
+            return s;
+        }
+
+        function makeSep() {
+            return document.createTextNode(' \u00B7 ');
         }
 
         var div = document.createElement('div');
         div.className = 'token-usage';
-        div.innerHTML = parts.join(' · ');
+        div.appendChild(makeSpan('token-label', 'Tokens:'));
+        div.appendChild(makeSep());
+        div.appendChild(makeSpan('token-in', formatTokens(inputTokens) + ' in'));
+        div.appendChild(makeSep());
+        div.appendChild(makeSpan('token-out', formatTokens(outputTokens) + ' out'));
+        div.appendChild(makeSep());
+        div.appendChild(makeSpan('token-total', formatTokens(total) + ' total'));
+
+        if (cacheCreation > 0 || cacheRead > 0) {
+            var cacheText = 'Cache: ' +
+                (cacheRead > 0 ? formatTokens(cacheRead) + ' hit' : '') +
+                (cacheRead > 0 && cacheCreation > 0 ? ', ' : '') +
+                (cacheCreation > 0 ? formatTokens(cacheCreation) + ' written' : '');
+            div.appendChild(makeSep());
+            div.appendChild(makeSpan('token-cache', cacheText));
+        }
         chatArea.appendChild(div);
         scrollToBottom();
 
@@ -463,6 +478,7 @@
 
     function updateContextUsage(used, limit) {
         if (!contextUsage || !contextUsageFill || !contextUsageLabel) return;
+        if (!limit || limit <= 0) return;
         var pct = Math.min(Math.round((used / limit) * 100), 100);
         contextUsageFill.style.width = pct + '%';
 
@@ -544,12 +560,16 @@
         if (!data || !data.conversations) return;
         var conversations = data.conversations;
 
+        historyList.textContent = '';
+
         if (conversations.length === 0) {
-            historyList.innerHTML = '<p class="history-empty">No saved conversations yet.</p>';
+            var emptyP = document.createElement('p');
+            emptyP.className = 'history-empty';
+            emptyP.textContent = 'No saved conversations yet.';
+            historyList.appendChild(emptyP);
             return;
         }
 
-        var html = '';
         for (var i = 0; i < conversations.length; i++) {
             var conv = conversations[i];
             var date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
@@ -559,35 +579,50 @@
             if (title.length > 70) title = title.substring(0, 70) + '...';
             var msgCount = conv.messageCount || 0;
 
-            html += '<div class="history-item" data-id="' + escapeHtml(conv.id) + '">';
-            html += '  <div class="history-item-main">';
-            html += '    <div class="history-item-title">' + escapeHtml(title) + '</div>';
-            html += '    <div class="history-item-meta">' + date + ' · ' + msgCount + ' messages</div>';
-            html += '  </div>';
-            html += '  <button class="history-delete-btn" data-id="' + escapeHtml(conv.id) + '" title="Delete">&#x2715;</button>';
-            html += '</div>';
-        }
-        historyList.innerHTML = html;
+            var item = document.createElement('div');
+            item.className = 'history-item';
+            item.dataset.id = conv.id;
 
-        historyList.querySelectorAll('.history-item-main').forEach(function (el) {
-            el.addEventListener('click', function () {
-                var id = this.parentElement.getAttribute('data-id');
-                if (id) {
+            var main = document.createElement('div');
+            main.className = 'history-item-main';
+
+            var titleDiv = document.createElement('div');
+            titleDiv.className = 'history-item-title';
+            titleDiv.textContent = title;
+
+            var metaDiv = document.createElement('div');
+            metaDiv.className = 'history-item-meta';
+            metaDiv.textContent = date + ' \u00B7 ' + msgCount + ' messages';
+
+            main.appendChild(titleDiv);
+            main.appendChild(metaDiv);
+
+            var delBtn = document.createElement('button');
+            delBtn.className = 'history-delete-btn';
+            delBtn.dataset.id = conv.id;
+            delBtn.title = 'Delete';
+            delBtn.innerHTML = '&#x2715;';
+
+            item.appendChild(main);
+            item.appendChild(delBtn);
+            historyList.appendChild(item);
+
+            main.addEventListener('click', (function (convId) {
+                return function () {
                     closeHistory();
-                    sendToBackend('load_conversation', { id: id });
-                }
-            });
-        });
+                    sendToBackend('load_conversation', { id: convId });
+                };
+            })(conv.id));
 
-        historyList.querySelectorAll('.history-delete-btn').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var id = this.getAttribute('data-id');
-                if (id) {
-                    sendToBackend('delete_conversation', { id: id });
-                }
-            });
-        });
+            delBtn.addEventListener('click', (function (convId) {
+                return function (e) {
+                    e.stopPropagation();
+                    var el = this.closest('.history-item');
+                    if (el) el.remove();
+                    sendToBackend('delete_conversation', { id: convId });
+                };
+            })(conv.id));
+        }
     }
 
     function handleConversationLoaded(data) {
@@ -683,7 +718,8 @@
         var tokens = parseInt(document.getElementById('maxTokensInput').value) || 8192;
         var theme = themeSelect ? themeSelect.value : currentTheme;
 
-        var retryMaxAttempts = parseInt(document.getElementById('retryMaxAttemptsInput').value) || 20;
+        var retryMaxAttemptsVal = parseInt(document.getElementById('retryMaxAttemptsInput').value);
+        var retryMaxAttempts = isNaN(retryMaxAttemptsVal) ? 20 : retryMaxAttemptsVal;
         var retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
         var maxToolRounds = parseInt(document.getElementById('maxToolRoundsInput').value) || 10;
         var promptCachingEnabled = document.getElementById('promptCachingCheckbox').checked;
@@ -791,7 +827,7 @@
         }
 
         lines.push('---');
-        lines.push('*Exported from AIDE Lite v1.1.0*');
+        lines.push('*Exported from AIDE Lite v1.1.1*');
 
         var markdown = lines.join('\n');
         var blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
@@ -908,9 +944,12 @@
     }
 
     function escapeHtml(text) {
-        var div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // --- Event Listeners & UI Wiring ---

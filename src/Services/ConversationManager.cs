@@ -219,6 +219,16 @@ public class ConversationManager
         for (var i = 0; i < lastToolResultIdx; i++)
         {
             if (!_messages[i].HasToolResult) continue;
+
+            // Content may be List<object> (newly created) or JsonArray (restored from disk)
+            if (_messages[i].Content is JsonArray jsonArray)
+            {
+                // Convert JsonArray to List<object> so compaction works uniformly
+                var converted = new List<object>();
+                foreach (var item in jsonArray)
+                    converted.Add(item?.DeepClone() ?? new JsonObject());
+                _messages[i].Content = converted;
+            }
             if (_messages[i].Content is not List<object> blocks) continue;
 
             // Replace each block with a compact version

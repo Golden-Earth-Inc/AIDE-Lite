@@ -7,6 +7,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; font-src 'self';">
     <title>AIDE Lite Settings</title>
     <link rel="stylesheet" href="styles.css?v=4">
 </head>
@@ -29,7 +30,8 @@
             <label for="contextDepthSelect">Context Depth</label>
             <select id="contextDepthSelect">
                 <option value="full">Full App (all modules)</option>
-                <option value="module">Current Module Only</option>
+                <option value="summary">Summary (lighter, fewer tokens)</option>
+                <option value="none">None (tools only)</option>
             </select>
         </div>
         <div class="form-group">
@@ -43,7 +45,7 @@
         </div>
         <div class="form-group">
             <label for="retryDelaySecondsInput">Retry Delay (seconds)</label>
-            <input type="number" id="retryDelaySecondsInput" value="60" min="1" max="300">
+            <input type="number" id="retryDelaySecondsInput" value="60" min="1" max="600">
             <small>Seconds to wait between retries (API retry-after header takes priority).</small>
         </div>
         <div class="form-group">
@@ -108,7 +110,7 @@
                 selectedModel: document.getElementById('modelSelect').value,
                 contextDepth: document.getElementById('contextDepthSelect').value,
                 maxTokens: parseInt(document.getElementById('maxTokensInput').value) || 8192,
-                retryMaxAttempts: parseInt(document.getElementById('retryMaxAttemptsInput').value) || 20,
+                retryMaxAttempts: (function(v) { var n = parseInt(v); return isNaN(n) ? 20 : n; })(document.getElementById('retryMaxAttemptsInput').value),
                 retryDelaySeconds: parseInt(document.getElementById('retryDelaySecondsInput').value) || 60,
                 maxToolRounds: parseInt(document.getElementById('maxToolRoundsInput').value) || 10,
                 promptCachingEnabled: document.getElementById('promptCachingCheckbox').checked,
