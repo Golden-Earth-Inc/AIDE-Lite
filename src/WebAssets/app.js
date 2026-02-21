@@ -100,6 +100,9 @@
             case 'token_usage':
                 handleTokenUsage(data);
                 break;
+            case 'retry_wait':
+                handleRetryWait(data);
+                break;
             case 'error':
                 handleError(data);
                 break;
@@ -205,6 +208,10 @@
     }
 
     function endStream() {
+        if (retryCountdownInterval) {
+            clearInterval(retryCountdownInterval);
+            retryCountdownInterval = null;
+        }
         if (streamElement) {
             streamElement.classList.remove('streaming');
             streamElement.innerHTML = renderMarkdown(streamBuffer);
@@ -344,6 +351,32 @@
         } else {
             badge.classList.add('hidden');
         }
+    }
+
+    // --- Retry Wait (rate limit / overload automatic retry) ---
+    var retryCountdownInterval = null;
+
+    function handleRetryWait(data) {
+        if (!data) return;
+        var attempt = data.attempt || 1;
+        var totalSec = data.delaySec || 15;
+        var maxRetries = data.maxRetries || 3;
+        var remaining = totalSec;
+
+        if (retryCountdownInterval) clearInterval(retryCountdownInterval);
+
+        showProcessingBar('Rate limited — retrying in ' + remaining + 's (attempt ' + attempt + '/' + maxRetries + ')');
+
+        retryCountdownInterval = setInterval(function () {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(retryCountdownInterval);
+                retryCountdownInterval = null;
+                showProcessingBar('Retrying...');
+            } else {
+                updateProcessingLabel('Rate limited — retrying in ' + remaining + 's (attempt ' + attempt + '/' + maxRetries + ')');
+            }
+        }, 1000);
     }
 
     // --- Error ---

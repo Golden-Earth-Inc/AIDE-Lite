@@ -261,7 +261,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     messages,
                     tools,
                     onTextDelta: token => SendToWebView("chat_streaming", new { token, done = false }),
-                    onToolStart: (toolName, toolId) => SendToWebView("tool_start", new { toolName }));
+                    onToolStart: (toolName, toolId) => SendToWebView("tool_start", new { toolName }),
+                    onRetryWait: (attempt, delaySec) => SendToWebView("retry_wait", new { attempt, delaySec, maxRetries = 3 }));
 
                 totalInputTokens += response.InputTokens;
                 totalOutputTokens += response.OutputTokens;

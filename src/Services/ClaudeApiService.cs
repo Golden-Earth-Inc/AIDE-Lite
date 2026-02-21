@@ -24,6 +24,8 @@ public class ClaudeApiService
 
     private const string ApiUrl = "https://api.anthropic.com/v1/messages";
     private const string ApiVersion = "2023-06-01";
+    private const int MaxRetries = 3;
+    private static readonly int[] RetryDelaysSeconds = { 15, 30, 60 };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -44,7 +46,7 @@ public class ClaudeApiService
     /// <summary>
     /// Send a streaming request to the Claude API with tool definitions.
     /// Invokes callbacks for text deltas, tool use blocks, and completion.
-    /// Returns the full stop reason and any tool use blocks that need execution.
+    /// Automatically retries on 429 (rate limit) and 529 (overloaded) with exponential backoff.
     /// </summary>
     public async Task<ApiResponse> SendStreamingRequestAsync(
         string systemPrompt,
@@ -52,6 +54,7 @@ public class ClaudeApiService
         List<Dictionary<string, object>>? tools,
         Action<string> onTextDelta,
         Action<string, string> onToolStart,
+        Action<int, int>? onRetryWait = null,
         CancellationToken externalToken = default)
     {
         _logService.Info("AIDE Lite: [API] Getting API key...");
@@ -88,41 +91,56 @@ public class ClaudeApiService
             var json = JsonSerializer.Serialize(requestBody, JsonOptions);
             _logService.Info($"AIDE Lite: [API] Request body size: {json.Length} chars");
 
-            using var httpClient = _httpClientService.CreateHttpClient();
-            httpClient.Timeout = TimeSpan.FromMinutes(5);
-
-            var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
-            request.Headers.Add("x-api-key", apiKey);
-            request.Headers.Add("anthropic-version", ApiVersion);
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            _logService.Info("AIDE Lite: [API] Sending HTTP request to api.anthropic.com...");
-            // Note: Mendix IHttpClient.SendAsync does not support HttpCompletionOption.
-            // Streaming tokens arrive buffered (all at once) rather than real-time.
-            // This is a Mendix framework limitation.
-            var response = await httpClient.SendAsync(request, ct);
-            _logService.Info($"AIDE Lite: [API] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
-
-            if (!response.IsSuccessStatusCode)
+            for (var attempt = 0; attempt <= MaxRetries; attempt++)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
-                _logService.Error($"AIDE Lite: [API] Error body: {errorBody}");
+                ct.ThrowIfCancellationRequested();
 
-                var statusCode = (int)response.StatusCode;
-                if (statusCode == 401)
-                    return ApiResponse.Error("Invalid API key. Please check your settings.", "auth_error");
-                if (statusCode == 429)
-                    return ApiResponse.Error("Rate limit exceeded. Please wait a moment and try again.", "rate_limit");
-                if (statusCode == 529)
-                    return ApiResponse.Error("Claude API is overloaded. Please try again shortly.", "overloaded");
+                using var httpClient = _httpClientService.CreateHttpClient();
+                httpClient.Timeout = TimeSpan.FromMinutes(5);
 
-                return ApiResponse.Error($"API error ({statusCode}): {errorBody}");
+                var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
+                request.Headers.Add("x-api-key", apiKey);
+                request.Headers.Add("anthropic-version", ApiVersion);
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                _logService.Info($"AIDE Lite: [API] Sending HTTP request (attempt {attempt + 1}/{MaxRetries + 1})...");
+                var response = await httpClient.SendAsync(request, ct);
+                _logService.Info($"AIDE Lite: [API] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(ct);
+                    _logService.Error($"AIDE Lite: [API] Error body: {errorBody}");
+
+                    var statusCode = (int)response.StatusCode;
+
+                    if (statusCode == 401)
+                        return ApiResponse.Error("Invalid API key. Please check your settings.", "auth_error");
+
+                    if (statusCode is 429 or 529 && attempt < MaxRetries)
+                    {
+                        var delaySec = GetRetryDelay(response, attempt);
+                        _logService.Info($"AIDE Lite: [API] Retryable error {statusCode}, waiting {delaySec}s before retry {attempt + 2}...");
+                        onRetryWait?.Invoke(attempt + 1, delaySec);
+                        await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
+                        continue;
+                    }
+
+                    if (statusCode == 429)
+                        return ApiResponse.Error("Rate limit exceeded after multiple retries. Try switching to claude-haiku-4-5-20251001 in Settings for higher rate limits, or wait a minute.", "rate_limit");
+                    if (statusCode == 529)
+                        return ApiResponse.Error("Claude API is overloaded after multiple retries. Please try again in a few minutes.", "overloaded");
+
+                    return ApiResponse.Error($"API error ({statusCode}): {errorBody}");
+                }
+
+                _logService.Info("AIDE Lite: [API] Parsing streaming response...");
+                var result = await ParseStreamingResponse(response, onTextDelta, onToolStart, ct);
+                _logService.Info($"AIDE Lite: [API] Stream complete: text={result.FullText?.Length ?? 0} chars, tools={result.ToolCalls.Count}, stop={result.StopReason}, error={result.ErrorMessage ?? "none"}");
+                return result;
             }
 
-            _logService.Info("AIDE Lite: [API] Parsing streaming response...");
-            var result = await ParseStreamingResponse(response, onTextDelta, onToolStart, ct);
-            _logService.Info($"AIDE Lite: [API] Stream complete: text={result.FullText?.Length ?? 0} chars, tools={result.ToolCalls.Count}, stop={result.StopReason}, error={result.ErrorMessage ?? "none"}");
-            return result;
+            return ApiResponse.Error("Rate limit exceeded after maximum retries.", "rate_limit");
         }
         catch (OperationCanceledException)
         {
@@ -143,6 +161,21 @@ public class ClaudeApiService
             _currentCts?.Dispose();
             _currentCts = null;
         }
+    }
+
+    /// <summary>
+    /// Determines how long to wait before retrying, using the Retry-After header if available,
+    /// otherwise falling back to a predefined exponential backoff schedule.
+    /// </summary>
+    private static int GetRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        if (response.Headers.TryGetValues("retry-after", out var values))
+        {
+            var retryAfter = values.FirstOrDefault();
+            if (int.TryParse(retryAfter, out var headerSeconds) && headerSeconds > 0)
+                return Math.Min(headerSeconds, 120);
+        }
+        return attempt < RetryDelaysSeconds.Length ? RetryDelaysSeconds[attempt] : 60;
     }
 
     public void Cancel()
