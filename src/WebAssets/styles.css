@@ -771,3 +771,28 @@ body.dark .success-msg { color: #86efac; }
 .image-attachments img:hover {
     opacity: 0.85;
 }
+
+/* === Dark mode: drag-over visibility boost === */
+body.dark .input-area.drag-over {
+    background: rgba(124, 58, 237, 0.12);
+}
+
+/* === Toast Notification === */
+.toast-notification {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--msg-assistant-bg, #333);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    z-index: 9999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: opacity 0.3s;
+}
+.toast-notification.fade-out {
+    opacity: 0;
+}

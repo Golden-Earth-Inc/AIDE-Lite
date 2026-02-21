@@ -52,6 +52,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     private ConversationHistoryService? _historyService;
     private string? _currentConversationId;
     private string? _currentConversationTitle;
+    private DateTime _currentConversationCreatedAt;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -256,6 +257,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             if (_currentConversationId == null)
             {
                 _currentConversationId = Guid.NewGuid().ToString("N");
+                _currentConversationCreatedAt = DateTime.UtcNow;
                 _currentConversationTitle = messageText.Length > 60
                     ? messageText[..60] + "..."
                     : messageText;
@@ -516,6 +518,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         _conversation!.RestoreFromJson(conversation.ApiMessagesJson);
         _currentConversationId = conversation.Id;
         _currentConversationTitle = conversation.Title;
+        _currentConversationCreatedAt = conversation.CreatedAt;
 
         SendToWebView("conversation_loaded", new
         {
@@ -574,7 +577,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             {
                 Id = _currentConversationId,
                 Title = _currentConversationTitle ?? "Untitled",
-                CreatedAt = isNew ? DateTime.UtcNow : DateTime.UtcNow,
+                CreatedAt = _currentConversationCreatedAt,
                 DisplayHistory = displayHistory,
                 ApiMessagesJson = _conversation.SerializeMessages()
             });
@@ -584,6 +587,11 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             DiagLog($"HandleSaveChatState error: {ex.Message}");
         }
     }
+
+    private static readonly HashSet<string> AllowedImageMediaTypes = new(StringComparer.Ordinal)
+    {
+        "image/jpeg", "image/png", "image/gif", "image/webp"
+    };
 
     private List<ImageAttachment> ParseImageAttachments(JsonObject? data)
     {
@@ -595,8 +603,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         {
             var base64 = item?["base64"]?.GetValue<string>();
             var mediaType = item?["mediaType"]?.GetValue<string>();
-            if (!string.IsNullOrEmpty(base64) && !string.IsNullOrEmpty(mediaType))
-                result.Add(new ImageAttachment(base64, mediaType));
+            if (string.IsNullOrEmpty(base64) || string.IsNullOrEmpty(mediaType)) continue;
+            if (!AllowedImageMediaTypes.Contains(mediaType))
+            {
+                DiagLog($"ParseImageAttachments: skipping unsupported media type '{mediaType}'");
+                continue;
+            }
+            result.Add(new ImageAttachment(base64, mediaType));
         }
         return result;
     }

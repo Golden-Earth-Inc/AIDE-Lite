@@ -21,6 +21,7 @@ public class ConversationManager
     public void AddUserMessage(string text)
     {
         CompactOldToolResults();
+        CompactOldImages();
         _messages.Add(ChatMessage.User(text));
         TrimIfNeeded();
     }
@@ -32,6 +33,7 @@ public class ConversationManager
     public void AddUserMessageWithImages(string text, List<ImageAttachment> images)
     {
         CompactOldToolResults();
+        CompactOldImages();
 
         var contentBlocks = new List<object>();
 
@@ -287,6 +289,51 @@ public class ConversationManager
                         content = "[previous tool result]"
                     };
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replace base64 image blocks in older user messages with lightweight text placeholders.
+    /// Prevents stale multi-MB image data from accumulating in memory and API payloads.
+    /// </summary>
+    private void CompactOldImages()
+    {
+        // Find the last user message that has content blocks (could contain images)
+        var lastImageMsgIdx = -1;
+        for (var i = _messages.Count - 1; i >= 0; i--)
+        {
+            if (_messages[i].Role == "user" && _messages[i].Content is List<object>
+                && !_messages[i].HasToolResult)
+            {
+                lastImageMsgIdx = i;
+                break;
+            }
+        }
+
+        if (lastImageMsgIdx <= 0) return;
+
+        for (var i = 0; i < lastImageMsgIdx; i++)
+        {
+            if (_messages[i].Role != "user") continue;
+            if (_messages[i].HasToolResult) continue;
+            if (_messages[i].Content is not List<object> blocks) continue;
+
+            var compacted = false;
+            for (var j = blocks.Count - 1; j >= 0; j--)
+            {
+                var blockJson = JsonSerializer.Serialize(blocks[j]);
+                var node = JsonNode.Parse(blockJson);
+                if (node?["type"]?.GetValue<string>() == "image")
+                {
+                    blocks.RemoveAt(j);
+                    compacted = true;
+                }
+            }
+
+            if (compacted)
+            {
+                blocks.Insert(0, new { type = "text", text = "[image previously attached]" });
             }
         }
     }

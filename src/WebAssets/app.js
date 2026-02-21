@@ -13,56 +13,65 @@
 (function () {
     'use strict';
 
+    // --- Constants ---
+    const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
+    const MAX_TEXTAREA_HEIGHT = 120;
+    const ALLOWED_IMAGE_TYPES = { 'image/jpeg': true, 'image/png': true, 'image/gif': true, 'image/webp': true };
+
     // --- State ---
-    var isStreaming = false;
-    var streamBuffer = '';
-    var streamElement = null;
-    var cumulativeInputTokens = 0;
-    var cumulativeOutputTokens = 0;
-    var currentTheme = 'light';
-    var chatHistory = [];
-    var pendingImages = [];
+    let isStreaming = false;
+    let streamBuffer = '';
+    let streamElement = null;
+    let cumulativeInputTokens = 0;
+    let cumulativeOutputTokens = 0;
+    let currentTheme = 'light';
+    let chatHistory = [];
+    let pendingImages = [];
+    let retryCountdownInterval = null;
+    let retryAttemptCount = 0;
+    let autoLoadPending = false;
+    let initialSettingsLoaded = false;
 
     // --- DOM References ---
-    var chatArea = document.getElementById('chatArea');
-    var chatInput = document.getElementById('chatInput');
-    var modeSelect = document.getElementById('modeSelect');
-    var sendBtn = document.getElementById('sendBtn');
-    var refreshBtn = document.getElementById('refreshBtn');
-    var newChatBtn = document.getElementById('newChatBtn');
-    var settingsBtn = document.getElementById('settingsBtn');
-    var settingsModal = document.getElementById('settingsModal');
-    var saveSettingsBtn = document.getElementById('saveSettingsBtn');
-    var cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
-    var toolActivity = document.getElementById('toolActivity');
-    var toolLabel = document.getElementById('toolLabel');
-    var stopBtn = document.getElementById('stopBtn');
-    var contextDot = document.getElementById('contextDot');
-    var contextText = document.getElementById('contextText');
-    var modelBadge = document.getElementById('modelBadge');
-    var welcomeScreen = document.getElementById('welcomeScreen');
-    var processingBar = document.getElementById('processingBar');
-    var processingLabel = document.getElementById('processingLabel');
-    var themeToggleBtn = document.getElementById('themeToggleBtn');
-    var themeSelect = document.getElementById('themeSelect');
-    var historyBtn = document.getElementById('historyBtn');
-    var historyModal = document.getElementById('historyModal');
-    var historyList = document.getElementById('historyList');
-    var historyCloseBtn = document.getElementById('historyCloseBtn');
-    var historyOverlay = document.getElementById('historyOverlay');
-    var contextUsage = document.getElementById('contextUsage');
-    var contextUsageFill = document.getElementById('contextUsageFill');
-    var contextUsageLabel = document.getElementById('contextUsageLabel');
-    var exportBtn = document.getElementById('exportBtn');
-    var exportModal = document.getElementById('exportModal');
-    var exportDownloadBtn = document.getElementById('exportDownloadBtn');
-    var exportCancelBtn = document.getElementById('exportCancelBtn');
-    var exportOverlay = document.getElementById('exportOverlay');
-    var exportToolActivity = document.getElementById('exportToolActivity');
-    var inputArea = document.getElementById('inputArea');
-    var imagePreview = document.getElementById('imagePreview');
-    var attachImageBtn = document.getElementById('attachImageBtn');
-    var imageFileInput = document.getElementById('imageFileInput');
+    const chatArea = document.getElementById('chatArea');
+    const chatInput = document.getElementById('chatInput');
+    const modeSelect = document.getElementById('modeSelect');
+    const sendBtn = document.getElementById('sendBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const newChatBtn = document.getElementById('newChatBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+    const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+    const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
+    const toolActivity = document.getElementById('toolActivity');
+    const toolLabel = document.getElementById('toolLabel');
+    const stopBtn = document.getElementById('stopBtn');
+    const contextDot = document.getElementById('contextDot');
+    const contextText = document.getElementById('contextText');
+    const modelBadge = document.getElementById('modelBadge');
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const processingBar = document.getElementById('processingBar');
+    const processingLabel = document.getElementById('processingLabel');
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+    const themeSelect = document.getElementById('themeSelect');
+    const historyBtn = document.getElementById('historyBtn');
+    const historyModal = document.getElementById('historyModal');
+    const historyList = document.getElementById('historyList');
+    const historyCloseBtn = document.getElementById('historyCloseBtn');
+    const historyOverlay = document.getElementById('historyOverlay');
+    const contextUsage = document.getElementById('contextUsage');
+    const contextUsageFill = document.getElementById('contextUsageFill');
+    const contextUsageLabel = document.getElementById('contextUsageLabel');
+    const exportBtn = document.getElementById('exportBtn');
+    const exportModal = document.getElementById('exportModal');
+    const exportDownloadBtn = document.getElementById('exportDownloadBtn');
+    const exportCancelBtn = document.getElementById('exportCancelBtn');
+    const exportOverlay = document.getElementById('exportOverlay');
+    const exportToolActivity = document.getElementById('exportToolActivity');
+    const inputArea = document.getElementById('inputArea');
+    const imagePreview = document.getElementById('imagePreview');
+    const attachImageBtn = document.getElementById('attachImageBtn');
+    const imageFileInput = document.getElementById('imageFileInput');
 
     // --- WebView Bridge (C# <-> JS messaging) ---
     function sendToBackend(type, payload) {
@@ -75,12 +84,11 @@
 
     // --- Message Dispatch (C# PostMessage -> JS handler routing) ---
     function handleMessage(event) {
-        // Mendix PostMessage delivers: event.data = { message: "type", data: ... }
-        var envelope = event.data;
+        const envelope = event.data;
         if (!envelope) return;
 
-        var type = envelope.message;
-        var data = envelope.data;
+        const type = envelope.message;
+        const data = envelope.data;
 
         if (type) {
             handleBackendMessage(type, data);
@@ -91,10 +99,6 @@
         switch (type) {
             case 'chat_streaming':
                 handleStreamChunk(data);
-                break;
-            case 'chat_response':
-                // Legacy: kept for backward compatibility but no longer sent by C#
-                handleChatResponse(data);
                 break;
             case 'tool_start':
                 handleToolStart(data);
@@ -137,10 +141,10 @@
 
     // --- Chat Message Handling ---
     function sendMessage() {
-        var text = chatInput.value.trim();
+        const text = chatInput.value.trim();
         if (!text || isStreaming) return;
 
-        var images = pendingImages.slice();
+        const images = pendingImages.slice();
         hideWelcome();
         appendMessage('user', text, images);
         chatHistory.push({ type: 'user', content: text, images: images });
@@ -156,7 +160,7 @@
         stopBtn.classList.remove('hidden');
         showProcessingBar('Thinking...');
 
-        var payload = { message: text, mode: modeSelect.value };
+        const payload = { message: text, mode: modeSelect.value };
         if (images.length > 0) {
             payload.images = images.map(function (img) {
                 return { base64: img.base64, mediaType: img.mediaType };
@@ -208,43 +212,45 @@
 
     function addCopyButton(div, markdown) {
         div.dataset.md = markdown;
-        var btn = document.createElement('button');
+        const btn = document.createElement('button');
         btn.className = 'copy-btn';
         btn.title = 'Copy (rich text + markdown)';
         btn.innerHTML = '&#x2398;';
         btn.addEventListener('click', function () {
-            var md = div.dataset.md;
-            var clone = div.cloneNode(true);
-            var cloneBtn = clone.querySelector('.copy-btn');
+            const md = div.dataset.md;
+            const clone = div.cloneNode(true);
+            const cloneBtn = clone.querySelector('.copy-btn');
             if (cloneBtn) cloneBtn.remove();
             inlineStylesForCopy(clone);
 
-            var styledHtml = '<div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;color:#1a1a2e;">' + clone.innerHTML + '</div>';
-            var htmlBlob = new Blob([styledHtml], { type: 'text/html' });
-            var textBlob = new Blob([md], { type: 'text/plain' });
+            const styledHtml = '<div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;color:#1a1a2e;">' + clone.innerHTML + '</div>';
+            const htmlBlob = new Blob([styledHtml], { type: 'text/html' });
+            const textBlob = new Blob([md], { type: 'text/plain' });
 
             navigator.clipboard.write([
                 new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
             ]).then(function () {
                 btn.textContent = '\u2713';
                 setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
+            }).catch(function (err) {
+                console.error('Clipboard write failed:', err);
             });
         });
         div.appendChild(btn);
     }
 
     function appendMessage(role, content, images) {
-        var div = document.createElement('div');
+        const div = document.createElement('div');
         div.className = 'message ' + role;
         if (role === 'assistant') {
             div.innerHTML = renderMarkdown(content);
             addCopyButton(div, content);
         } else {
             if (images && images.length > 0) {
-                var imgContainer = document.createElement('div');
+                const imgContainer = document.createElement('div');
                 imgContainer.className = 'image-attachments';
                 images.forEach(function (img) {
-                    var imgEl = document.createElement('img');
+                    const imgEl = document.createElement('img');
                     imgEl.src = img.dataUrl || ('data:' + img.mediaType + ';base64,' + img.base64);
                     imgEl.alt = img.name || 'Attached image';
                     imgEl.title = img.name || 'Attached image';
@@ -252,7 +258,7 @@
                 });
                 div.appendChild(imgContainer);
             }
-            var textNode = document.createElement('span');
+            const textNode = document.createElement('span');
             textNode.textContent = content;
             div.appendChild(textNode);
         }
@@ -276,8 +282,6 @@
         if (!data) return;
 
         if (!streamElement) {
-            // First chunk — create the streaming message element
-            // (isStreaming and button swap already done in sendMessage)
             isStreaming = true;
             hideWelcome();
             streamBuffer = '';
@@ -298,25 +302,6 @@
         if (data.done) {
             endStream();
         }
-    }
-
-    function handleChatResponse(data) {
-        if (isStreaming) {
-            endStream();
-        }
-        // Handle both string data (BYOLLM pattern) and object data
-        var content = '';
-        if (typeof data === 'string') {
-            content = data;
-        } else if (data && data.content) {
-            content = data.content;
-        }
-        if (content) {
-            hideWelcome();
-            appendMessage('assistant', content);
-            chatHistory.push({ type: 'assistant', content: content });
-        }
-        sendBtn.disabled = false;
     }
 
     function endStream() {
@@ -366,8 +351,8 @@
     // --- Tool Activity ---
     function handleToolStart(data) {
         if (!data) return;
-        var name = data.toolName || 'tool';
-        var label = formatToolName(name);
+        const name = data.toolName || 'tool';
+        const label = formatToolName(name);
         toolLabel.textContent = label;
         toolActivity.classList.remove('hidden');
         showProcessingBar(label);
@@ -386,7 +371,7 @@
     }
 
     function formatToolName(name) {
-        var labels = {
+        const labels = {
             'get_modules': 'Reading modules...',
             'get_entities': 'Reading entities...',
             'get_entity_details': 'Reading entity details...',
@@ -415,8 +400,8 @@
     // --- Microflow Created ---
     function handleMicroflowCreated(data) {
         if (!data) return;
-        var msg = 'Microflow "' + (data.name || '') + '" created successfully. Press F4 to refresh.';
-        var div = document.createElement('div');
+        const msg = 'Microflow "' + (data.name || '') + '" created successfully. Press F4 to refresh.';
+        const div = document.createElement('div');
         div.className = 'success-msg';
         div.textContent = msg;
         chatArea.appendChild(div);
@@ -425,7 +410,7 @@
     }
 
     // --- Model Changed (prompt user to refresh context) ---
-    function handleModelChanged(data) {
+    function handleModelChanged() {
         contextDot.className = 'status-dot stale';
         contextText.textContent = 'Context outdated — click \u21BB to refresh';
     }
@@ -433,15 +418,15 @@
     // --- Token Usage ---
     function handleTokenUsage(data) {
         if (!data) return;
-        var inputTokens = data.inputTokens || 0;
-        var outputTokens = data.outputTokens || 0;
-        var cacheCreation = data.cacheCreationTokens || 0;
-        var cacheRead = data.cacheReadTokens || 0;
+        const inputTokens = data.inputTokens || 0;
+        const outputTokens = data.outputTokens || 0;
+        const cacheCreation = data.cacheCreationTokens || 0;
+        const cacheRead = data.cacheReadTokens || 0;
         cumulativeInputTokens += inputTokens;
         cumulativeOutputTokens += outputTokens;
 
-        var total = inputTokens + outputTokens;
-        var parts = [
+        const total = inputTokens + outputTokens;
+        const parts = [
             '<span class="token-label">Tokens:</span>',
             '<span class="token-in">' + formatTokens(inputTokens) + ' in</span>',
             '<span class="token-out">' + formatTokens(outputTokens) + ' out</span>',
@@ -456,7 +441,7 @@
                 '</span>');
         }
 
-        var div = document.createElement('div');
+        const div = document.createElement('div');
         div.className = 'token-usage';
         div.innerHTML = parts.join(' · ');
         chatArea.appendChild(div);
@@ -477,9 +462,9 @@
     }
 
     function updateTokenBadge() {
-        var badge = document.getElementById('tokenBadge');
+        const badge = document.getElementById('tokenBadge');
         if (!badge) return;
-        var total = cumulativeInputTokens + cumulativeOutputTokens;
+        const total = cumulativeInputTokens + cumulativeOutputTokens;
         if (total > 0) {
             badge.textContent = formatTokens(total) + ' tokens';
             badge.classList.remove('hidden');
@@ -490,7 +475,7 @@
 
     function updateContextUsage(used, limit) {
         if (!contextUsage || !contextUsageFill || !contextUsageLabel) return;
-        var pct = Math.min(Math.round((used / limit) * 100), 100);
+        const pct = Math.min(Math.round((used / limit) * 100), 100);
         contextUsageFill.style.width = pct + '%';
 
         if (pct >= 80) {
@@ -516,16 +501,13 @@
     }
 
     // --- Retry Wait (rate limit / overload automatic retry) ---
-    var retryCountdownInterval = null;
-    var retryAttemptCount = 0;
-
     function handleRetryWait(data) {
         if (!data) return;
         retryAttemptCount++;
-        var attempt = retryAttemptCount;
-        var totalSec = data.delaySec || 15;
-        var maxRetries = data.maxRetries || 20;
-        var remaining = totalSec;
+        const attempt = retryAttemptCount;
+        const totalSec = data.delaySec || 15;
+        const maxRetries = data.maxRetries || 20;
+        let remaining = totalSec;
 
         if (retryCountdownInterval) clearInterval(retryCountdownInterval);
 
@@ -547,8 +529,8 @@
     function handleError(data) {
         if (!data) return;
         endStream();
-        var msg = data.message || 'An error occurred.';
-        var div = document.createElement('div');
+        const msg = data.message || 'An error occurred.';
+        const div = document.createElement('div');
         div.className = 'error-msg';
         div.textContent = msg;
         chatArea.appendChild(div);
@@ -567,11 +549,9 @@
         historyModal.classList.add('hidden');
     }
 
-    var autoLoadPending = false;
-
     function handleHistoryList(data) {
         if (!data || !data.conversations) return;
-        var conversations = data.conversations;
+        const conversations = data.conversations;
 
         if (autoLoadPending) {
             autoLoadPending = false;
@@ -586,15 +566,15 @@
             return;
         }
 
-        var html = '';
-        for (var i = 0; i < conversations.length; i++) {
-            var conv = conversations[i];
-            var date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
+        let html = '';
+        for (let i = 0; i < conversations.length; i++) {
+            const conv = conversations[i];
+            const date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
                 month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
-            var title = conv.title || 'Untitled';
+            let title = conv.title || 'Untitled';
             if (title.length > 70) title = title.substring(0, 70) + '...';
-            var msgCount = conv.messageCount || 0;
+            const msgCount = conv.messageCount || 0;
 
             html += '<div class="history-item" data-id="' + escapeHtml(conv.id) + '">';
             html += '  <div class="history-item-main">';
@@ -608,7 +588,7 @@
 
         historyList.querySelectorAll('.history-item-main').forEach(function (el) {
             el.addEventListener('click', function () {
-                var id = this.parentElement.getAttribute('data-id');
+                const id = this.parentElement.getAttribute('data-id');
                 if (id) {
                     closeHistory();
                     sendToBackend('load_conversation', { id: id });
@@ -619,7 +599,7 @@
         historyList.querySelectorAll('.history-delete-btn').forEach(function (btn) {
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                var id = this.getAttribute('data-id');
+                const id = this.getAttribute('data-id');
                 if (id) {
                     sendToBackend('delete_conversation', { id: id });
                 }
@@ -642,9 +622,9 @@
         sendBtn.disabled = false;
         resetContextUsage();
 
-        var history = data.displayHistory;
-        for (var i = 0; i < history.length; i++) {
-            var entry = history[i];
+        const history = data.displayHistory;
+        for (let i = 0; i < history.length; i++) {
+            const entry = history[i];
             chatHistory.push(entry);
 
             switch (entry.type) {
@@ -658,24 +638,27 @@
                     break;
                 case 'tool_result':
                     break;
-                case 'success':
-                    var sdiv = document.createElement('div');
+                case 'success': {
+                    const sdiv = document.createElement('div');
                     sdiv.className = 'success-msg';
                     sdiv.textContent = entry.content;
                     chatArea.appendChild(sdiv);
                     break;
-                case 'error':
-                    var ediv = document.createElement('div');
+                }
+                case 'error': {
+                    const ediv = document.createElement('div');
                     ediv.className = 'error-msg';
                     ediv.textContent = entry.content;
                     chatArea.appendChild(ediv);
                     break;
-                case 'tokens':
-                    var tdiv = document.createElement('div');
+                }
+                case 'tokens': {
+                    const tdiv = document.createElement('div');
                     tdiv.className = 'token-usage';
                     tdiv.textContent = entry.content;
                     chatArea.appendChild(tdiv);
                     break;
+                }
             }
         }
 
@@ -692,8 +675,6 @@
     function closeSettings() {
         settingsModal.classList.add('hidden');
     }
-
-    var initialSettingsLoaded = false;
 
     function handleLoadSettings(data) {
         if (!data) return;
@@ -726,23 +707,23 @@
         }
     }
 
-    function handleSettingsSaved(data) {
+    function handleSettingsSaved() {
         closeSettings();
     }
 
     function saveSettings() {
-        var apiKey = document.getElementById('apiKeyInput').value;
-        var model = document.getElementById('modelSelect').value;
-        var depth = document.getElementById('contextDepthSelect').value;
-        var tokens = parseInt(document.getElementById('maxTokensInput').value) || 8192;
-        var theme = themeSelect ? themeSelect.value : currentTheme;
+        const apiKey = document.getElementById('apiKeyInput').value;
+        const model = document.getElementById('modelSelect').value;
+        const depth = document.getElementById('contextDepthSelect').value;
+        const tokens = parseInt(document.getElementById('maxTokensInput').value) || 8192;
+        const theme = themeSelect ? themeSelect.value : currentTheme;
 
-        var retryMaxAttempts = parseInt(document.getElementById('retryMaxAttemptsInput').value) || 20;
-        var retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
-        var maxToolRounds = parseInt(document.getElementById('maxToolRoundsInput').value) || 10;
-        var promptCachingEnabled = document.getElementById('promptCachingCheckbox').checked;
-        var autoRefreshContext = document.getElementById('autoRefreshContextCheckbox').checked;
-        var autoLoadLastConversation = document.getElementById('autoLoadLastConversationCheckbox').checked;
+        const retryMaxAttempts = parseInt(document.getElementById('retryMaxAttemptsInput').value) || 20;
+        const retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
+        const maxToolRounds = parseInt(document.getElementById('maxToolRoundsInput').value) || 10;
+        const promptCachingEnabled = document.getElementById('promptCachingCheckbox').checked;
+        const autoRefreshContext = document.getElementById('autoRefreshContextCheckbox').checked;
+        const autoLoadLastConversation = document.getElementById('autoLoadLastConversationCheckbox').checked;
 
         sendToBackend('save_settings', {
             apiKey: apiKey,
@@ -763,7 +744,7 @@
     }
 
     function updateModelBadge(model) {
-        var labels = {
+        const labels = {
             'claude-sonnet-4-5-20250929': 'Sonnet 4.5',
             'claude-sonnet-4-6': 'Sonnet 4.6',
             'claude-opus-4-6': 'Opus 4.6',
@@ -796,21 +777,21 @@
     }
 
     function exportChat() {
-        var includeTools = exportToolActivity.checked;
-        var modelName = modelBadge.textContent || 'Claude';
-        var now = new Date();
-        var dateStr = now.toISOString().slice(0, 10);
-        var timeStr = now.toTimeString().slice(0, 5);
+        const includeTools = exportToolActivity.checked;
+        const modelName = modelBadge.textContent || 'Claude';
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10);
+        const timeStr = now.toTimeString().slice(0, 5);
 
-        var lines = [];
+        const lines = [];
         lines.push('# AIDE Lite Chat Export');
         lines.push('**Date:** ' + dateStr + ' ' + timeStr + ' | **Model:** ' + modelName);
         lines.push('');
         lines.push('---');
         lines.push('');
 
-        for (var i = 0; i < chatHistory.length; i++) {
-            var entry = chatHistory[i];
+        for (let i = 0; i < chatHistory.length; i++) {
+            const entry = chatHistory[i];
             switch (entry.type) {
                 case 'user':
                     lines.push('## User');
@@ -851,10 +832,10 @@
         lines.push('---');
         lines.push('*Exported from AIDE Lite v1.1.0*');
 
-        var markdown = lines.join('\n');
-        var blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
+        const markdown = lines.join('\n');
+        const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
         a.href = url;
         a.download = 'aide-lite-chat-' + dateStr + '.md';
         document.body.appendChild(a);
@@ -871,31 +852,26 @@
     function renderMarkdown(text) {
         if (!text) return '';
 
-        // Phase 1: Extract code blocks and inline code into placeholders so they survive escaping
-        var codeBlocks = [];
-        var html = text;
+        const codeBlocks = [];
+        let html = text;
 
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (m, lang, code) {
-            var idx = codeBlocks.length;
+            const idx = codeBlocks.length;
             codeBlocks.push('<pre><code class="language-' + (lang || '') + '">' + escapeHtml(code) + '</code></pre>');
             return '\x00CODEBLOCK' + idx + '\x00';
         });
 
         html = html.replace(/`([^`]+)`/g, function (m, code) {
-            var idx = codeBlocks.length;
+            const idx = codeBlocks.length;
             codeBlocks.push('<code>' + escapeHtml(code) + '</code>');
             return '\x00CODEBLOCK' + idx + '\x00';
         });
 
-        // Phase 2: Escape all remaining text to prevent XSS
         html = escapeHtml(html);
 
-        // Phase 3: Restore code block placeholders
         html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, function (m, idx) {
             return codeBlocks[parseInt(idx)] || '';
         });
-
-        // Phase 4: Apply markdown formatting on escaped text (safe — all user content is escaped)
 
         // Bold
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -925,20 +901,20 @@
         html = html.replace(/<\/ol>\s*<ol>/g, '');
 
         // Tables
-        var tableIsHeader = true;
+        let tableIsHeader = true;
         html = html.replace(/^\|(.+)\|$/gm, function (match, content) {
-            var cells = content.split('|').map(function (c) { return c.trim(); });
+            const cells = content.split('|').map(function (c) { return c.trim(); });
             if (cells.every(function (c) { return /^[-:]+$/.test(c); })) {
                 tableIsHeader = false;
                 return '<!-- table separator -->';
             }
-            var tag = tableIsHeader ? 'th' : 'td';
-            var row = cells.map(function (c) { return '<' + tag + '>' + c + '</' + tag + '>'; }).join('');
+            const tag = tableIsHeader ? 'th' : 'td';
+            const row = cells.map(function (c) { return '<' + tag + '>' + c + '</' + tag + '>'; }).join('');
             return '<tr>' + row + '</tr>';
         });
-        html = html.replace(/((<tr>[\s\S]*?<\/tr>\s*)+)/g, function (m) {
+        html = html.replace(/((<tr>[\s\S]*?<\/tr>\s*)+)/g, function () {
             tableIsHeader = true;
-            return '<table>' + m + '</table>';
+            return '<table>' + arguments[0] + '</table>';
         });
         html = html.replace(/<!-- table separator -->\s*/g, '');
 
@@ -966,25 +942,43 @@
     }
 
     function escapeHtml(text) {
-        var div = document.createElement('div');
+        const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
 
-    // --- Image Attachment Handling ---
-    var allowedImageTypes = { 'image/jpeg': true, 'image/png': true, 'image/gif': true, 'image/webp': true };
+    // --- Transient Toast Notification ---
+    function showToast(message) {
+        const toast = document.createElement('div');
+        toast.className = 'toast-notification';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(function () {
+            toast.classList.add('fade-out');
+            setTimeout(function () { toast.remove(); }, 300);
+        }, 2500);
+    }
 
+    // --- Image Attachment Handling ---
     function addImageFile(file) {
-        if (!allowedImageTypes[file.type]) return;
-        if (file.size > 20 * 1024 * 1024) return; // 20 MB limit
-        var reader = new FileReader();
+        if (!file.type || !ALLOWED_IMAGE_TYPES[file.type]) {
+            showToast('Unsupported image format. Use JPEG, PNG, GIF, or WebP.');
+            return;
+        }
+        if (file.size > MAX_IMAGE_SIZE) {
+            showToast('Image too large (max 20 MB).');
+            return;
+        }
+        const reader = new FileReader();
         reader.onload = function (e) {
-            var dataUrl = e.target.result;
-            var commaIdx = dataUrl.indexOf(',');
-            var base64 = dataUrl.substring(commaIdx + 1);
-            var mediaType = file.type;
-            pendingImages.push({ base64: base64, mediaType: mediaType, name: file.name, dataUrl: dataUrl });
+            const dataUrl = e.target.result;
+            const commaIdx = dataUrl.indexOf(',');
+            const base64 = dataUrl.substring(commaIdx + 1);
+            pendingImages.push({ base64: base64, mediaType: file.type, name: file.name, dataUrl: dataUrl });
             renderImagePreviews();
+        };
+        reader.onerror = function () {
+            showToast('Failed to read image: ' + file.name);
         };
         reader.readAsDataURL(file);
     }
@@ -997,22 +991,22 @@
         }
         imagePreview.classList.add('has-images');
         pendingImages.forEach(function (img, idx) {
-            var item = document.createElement('div');
+            const item = document.createElement('div');
             item.className = 'image-preview-item';
 
-            var thumb = document.createElement('img');
+            const thumb = document.createElement('img');
             thumb.className = 'image-preview-thumb';
             thumb.src = img.dataUrl;
             thumb.alt = img.name || 'image';
             thumb.title = img.name || 'Attached image';
 
-            var removeBtn = document.createElement('button');
+            const removeBtn = document.createElement('button');
             removeBtn.className = 'image-preview-remove';
             removeBtn.innerHTML = '\u00D7';
             removeBtn.title = 'Remove image';
             removeBtn.setAttribute('data-idx', idx);
             removeBtn.addEventListener('click', function () {
-                var i = parseInt(this.getAttribute('data-idx'), 10);
+                const i = parseInt(this.getAttribute('data-idx'), 10);
                 pendingImages.splice(i, 1);
                 renderImagePreviews();
             });
@@ -1023,8 +1017,7 @@
         });
     }
 
-    // Block WebView2 from navigating to dropped files globally —
-    // without this, the browser tries to open the file URL before JS can handle it
+    // Block WebView2 from navigating to dropped files globally
     document.addEventListener('dragover', function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -1043,15 +1036,16 @@
     inputArea.addEventListener('dragleave', function (e) {
         e.preventDefault();
         e.stopPropagation();
+        if (inputArea.contains(e.relatedTarget)) return;
         inputArea.classList.remove('drag-over');
     });
     inputArea.addEventListener('drop', function (e) {
         e.preventDefault();
         e.stopPropagation();
         inputArea.classList.remove('drag-over');
-        var files = e.dataTransfer && e.dataTransfer.files;
+        const files = e.dataTransfer && e.dataTransfer.files;
         if (files) {
-            for (var i = 0; i < files.length; i++) {
+            for (let i = 0; i < files.length; i++) {
                 addImageFile(files[i]);
             }
         }
@@ -1059,11 +1053,11 @@
 
     // Paste images from clipboard
     chatInput.addEventListener('paste', function (e) {
-        var items = e.clipboardData && e.clipboardData.items;
+        const items = e.clipboardData && e.clipboardData.items;
         if (!items) return;
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].kind === 'file' && allowedImageTypes[items[i].type]) {
-                var file = items[i].getAsFile();
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && ALLOWED_IMAGE_TYPES[items[i].type]) {
+                const file = items[i].getAsFile();
                 if (file) addImageFile(file);
             }
         }
@@ -1075,9 +1069,9 @@
         imageFileInput.click();
     });
     imageFileInput.addEventListener('change', function () {
-        var files = imageFileInput.files;
+        const files = imageFileInput.files;
         if (files) {
-            for (var i = 0; i < files.length; i++) {
+            for (let i = 0; i < files.length; i++) {
                 addImageFile(files[i]);
             }
         }
@@ -1108,7 +1102,7 @@
     // Auto-resize textarea
     chatInput.addEventListener('input', function () {
         this.style.height = 'auto';
-        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        this.style.height = Math.min(this.scrollHeight, MAX_TEXTAREA_HEIGHT) + 'px';
     });
 
     refreshBtn.addEventListener('click', function () {
@@ -1118,7 +1112,6 @@
     });
 
     newChatBtn.addEventListener('click', function () {
-        // Cancel any in-progress streaming and reset state
         if (isStreaming) {
             sendToBackend('cancel');
             endStream();
@@ -1143,41 +1136,34 @@
     saveSettingsBtn.addEventListener('click', saveSettings);
     cancelSettingsBtn.addEventListener('click', closeSettings);
 
-    // Theme toggle button (header quick-toggle)
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', function () {
-            var newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
             applyTheme(newTheme);
-            // Persist theme-only save (null guards in SaveConfig protect other settings)
             sendToBackend('save_settings', { theme: newTheme });
         });
     }
 
-    // Live preview: apply theme immediately when dropdown changes in settings modal
     if (themeSelect) {
         themeSelect.addEventListener('change', function () {
             applyTheme(this.value);
         });
     }
 
-    // History
     if (historyBtn) historyBtn.addEventListener('click', openHistory);
     if (historyCloseBtn) historyCloseBtn.addEventListener('click', closeHistory);
     if (historyOverlay) historyOverlay.addEventListener('click', closeHistory);
 
-    // Export chat
     if (exportBtn) exportBtn.addEventListener('click', openExport);
     if (exportDownloadBtn) exportDownloadBtn.addEventListener('click', exportChat);
     if (exportCancelBtn) exportCancelBtn.addEventListener('click', closeExport);
     if (exportOverlay) exportOverlay.addEventListener('click', closeExport);
 
-    // Close settings modal on overlay click
     document.querySelector('#settingsModal .modal-overlay')?.addEventListener('click', closeSettings);
 
-    // Quick actions
     document.querySelectorAll('.quick-action').forEach(function (btn) {
         btn.addEventListener('click', function () {
-            var prompt = this.getAttribute('data-prompt');
+            const prompt = this.getAttribute('data-prompt');
             if (prompt) {
                 chatInput.value = prompt;
                 sendMessage();
@@ -1186,14 +1172,10 @@
     });
 
     // --- Initialize WebView Message Bridge ---
-    // IMPORTANT: Per Mendix WebView API, the JS side MUST post 'MessageListenerRegistered'
-    // after attaching its message listener. Without this handshake, all C# PostMessage
-    // calls are silently queued and never delivered to JS.
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.addEventListener('message', handleMessage);
         sendToBackend('MessageListenerRegistered');
     }
 
-    // Request settings on load (will be delivered after MessageListenerRegistered flushes the queue)
     sendToBackend('get_settings');
 })();
