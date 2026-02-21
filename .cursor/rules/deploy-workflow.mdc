@@ -36,11 +36,13 @@ New-Item -ItemType Directory -Path $dest -Force | Out-Null
 Copy-Item -Path "src\bin\Release\net8.0-windows\*" -Destination $dest -Recurse -Force
 ```
 
-## Step 4 — Launch Studio Pro
+## Step 4 — Launch Studio Pro with project
 
 ```powershell
-Start-Process "C:\Users\tomekgolembiewski\AppData\Local\Programs\Mendix\10.24.15.93102\modeler\studiopro.exe"
+Start-Process "C:\Users\tomekgolembiewski\AppData\Local\Programs\Mendix\10.24.15.93102\modeler\studiopro.exe" -ArgumentList "`"C:\MendixProjects\LEA-OpusPlugin\Zeiterfassung 2024.mpr`""
 ```
+
+This opens Studio Pro directly into the project without the startup dialog.
 
 ## Important Notes
 
@@ -48,3 +50,4 @@ Start-Process "C:\Users\tomekgolembiewski\AppData\Local\Programs\Mendix\10.24.15
 - NEVER skip this workflow. The user expects the extension to be deployed and Studio Pro running after every change.
 - If Studio Pro is not running in Step 1, skip straight to Step 2.
 - Always verify the build succeeded (exit code 0) before copying.
+- The `.mpr` project path above is per-project. If the user switches to a different Mendix project, ask them for the new `.mpr` path and update Step 4 accordingly.
