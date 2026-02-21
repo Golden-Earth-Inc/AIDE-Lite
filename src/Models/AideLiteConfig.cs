@@ -38,4 +38,10 @@ public class AideLiteConfig
 
     [JsonPropertyName("promptCachingEnabled")]
     public bool PromptCachingEnabled { get; set; } = true;
+
+    [JsonPropertyName("autoRefreshContext")]
+    public bool AutoRefreshContext { get; set; } = true;
+
+    [JsonPropertyName("autoLoadLastConversation")]
+    public bool AutoLoadLastConversation { get; set; } = true;
 }

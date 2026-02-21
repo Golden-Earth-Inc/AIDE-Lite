@@ -79,14 +79,19 @@
         </div>
 
         <!-- Input Area -->
-        <div class="input-area">
-            <select id="modeSelect" class="mode-select" title="Interaction mode">
-                <option value="agent">Agent</option>
-                <option value="ask">Ask</option>
-            </select>
-            <textarea id="chatInput" placeholder="Agent mode — can read and modify your app..." rows="2"></textarea>
-            <button id="sendBtn" class="send-btn" title="Send">&#x27A4;</button>
-            <button id="stopBtn" class="stop-btn hidden" title="Stop generating">&#x25A0;</button>
+        <div class="input-area" id="inputArea">
+            <div id="imagePreview" class="image-preview"></div>
+            <div class="input-row">
+                <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
+                <button id="attachImageBtn" class="attach-btn" title="Attach image">&#x2795;</button>
+                <select id="modeSelect" class="mode-select" title="Interaction mode">
+                    <option value="agent">Agent</option>
+                    <option value="ask">Ask</option>
+                </select>
+                <textarea id="chatInput" placeholder="Agent mode — can read and modify your app..." rows="2"></textarea>
+                <button id="sendBtn" class="send-btn" title="Send">&#x27A4;</button>
+                <button id="stopBtn" class="stop-btn hidden" title="Stop generating">&#x25A0;</button>
+            </div>
         </div>
     </div>
 
@@ -139,6 +144,16 @@
                 <label for="promptCachingCheckbox">Prompt Caching</label>
                 <input type="checkbox" id="promptCachingCheckbox" checked>
                 <small>Cache system prompt and tools to reduce rate limit usage (~90% savings on repeated calls).</small>
+            </div>
+            <div class="form-group">
+                <label for="autoRefreshContextCheckbox">Auto-Refresh Context on Startup</label>
+                <input type="checkbox" id="autoRefreshContextCheckbox" checked>
+                <small>Automatically load app context when the extension opens.</small>
+            </div>
+            <div class="form-group">
+                <label for="autoLoadLastConversationCheckbox">Auto-Load Last Conversation</label>
+                <input type="checkbox" id="autoLoadLastConversationCheckbox" checked>
+                <small>Automatically restore the most recent conversation on startup.</small>
             </div>
             <div class="form-group">
                 <label for="themeSelect">Theme</label>

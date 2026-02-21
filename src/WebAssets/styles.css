@@ -408,12 +408,44 @@ body {
 /* === Input Area === */
 .input-area {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
     padding: 10px 12px;
     background: var(--bg-input-area);
     border-top: 1px solid var(--border-primary);
     flex-shrink: 0;
+    transition: border-color 0.2s, background 0.2s;
+}
+.input-area.drag-over {
+    border-top: 2px dashed #7c3aed;
+    background: rgba(124, 58, 237, 0.05);
+}
+.input-row {
+    display: flex;
+    gap: 8px;
     align-items: flex-end;
+}
+.attach-btn {
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border-input);
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-self: flex-end;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.attach-btn:hover {
+    border-color: #7c3aed;
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.06);
 }
 .mode-select {
     padding: 6px 4px;
@@ -670,4 +702,72 @@ body.dark .success-msg { color: #86efac; }
 .history-delete-btn:hover {
     color: #dc2626;
     background: var(--bg-error);
+}
+
+/* === Image Preview Strip (above input) === */
+.image-preview {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 4px;
+}
+.image-preview.has-images {
+    display: flex;
+}
+.image-preview-item {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    overflow: visible;
+}
+.image-preview-thumb {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border-primary);
+    display: block;
+}
+.image-preview-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #dc2626;
+    color: #fff;
+    border: 2px solid var(--bg-input-area);
+    font-size: 12px;
+    line-height: 16px;
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.image-preview-remove:hover {
+    background: #b91c1c;
+}
+
+/* === Image attachments in chat bubbles === */
+.image-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.image-attachments img {
+    max-width: 180px;
+    max-height: 140px;
+    border-radius: 6px;
+    border: 1px solid var(--border-primary);
+    object-fit: contain;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.image-attachments img:hover {
+    opacity: 0.85;
 }
