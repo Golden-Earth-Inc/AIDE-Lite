@@ -184,8 +184,9 @@ The full app model with entity attributes, types, associations, and microflow ac
     /// </summary>
     private const string AskModePrefix =
         @"IMPORTANT — ASK MODE IS ACTIVE.
-You are in read-only Ask mode. You MUST NOT use any tools that modify the application (create_microflow, replace_microflow, rename_microflow, add_activities_to_microflow, edit_microflow_activity). No tools are available in this mode.
-You may ONLY answer questions, explain concepts, describe the app model from context, and provide guidance. Do NOT suggest running tools or promise to make changes — instead explain what the user would need to do.
+You are in read-only Ask mode. You can use read-only tools (get_modules, get_entities, get_microflow_details, search_model, etc.) to explore the app model and answer questions.
+You MUST NOT make any changes to the application. No write tools are available.
+Answer questions, explain code, describe the model, and provide guidance.
 
 ";
 
