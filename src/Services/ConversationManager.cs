@@ -20,9 +20,42 @@ public class ConversationManager
 
     public void AddUserMessage(string text)
     {
-        // Compact old tool results before adding — keeps token usage manageable over long chats
         CompactOldToolResults();
         _messages.Add(ChatMessage.User(text));
+        TrimIfNeeded();
+    }
+
+    /// <summary>
+    /// Add a user message that contains both images and text.
+    /// Claude API requires content blocks: image blocks first, then text block.
+    /// </summary>
+    public void AddUserMessageWithImages(string text, List<ImageAttachment> images)
+    {
+        CompactOldToolResults();
+
+        var contentBlocks = new List<object>();
+
+        foreach (var img in images)
+        {
+            contentBlocks.Add(new
+            {
+                type = "image",
+                source = new
+                {
+                    type = "base64",
+                    media_type = img.MediaType,
+                    data = img.Base64
+                }
+            });
+        }
+
+        contentBlocks.Add(new { type = "text", text });
+
+        _messages.Add(new ChatMessage
+        {
+            Role = "user",
+            Content = contentBlocks
+        });
         TrimIfNeeded();
     }
 

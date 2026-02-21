@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AideLite.ModelReaders;
 using AideLite.Models.DTOs;
+using AideLite.Models.Messages;
 using AideLite.ModelWriters;
 using AideLite.Services;
 using AideLite.Tools;
@@ -264,7 +265,16 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             var mode = data?["mode"]?.GetValue<string>() ?? "agent";
             var isAskMode = mode == "ask";
 
-            _conversation!.AddUserMessage(messageText);
+            var imageAttachments = ParseImageAttachments(data);
+            if (imageAttachments.Count > 0)
+            {
+                DiagLog($"[2/6] Attaching {imageAttachments.Count} image(s) to message");
+                _conversation!.AddUserMessageWithImages(messageText, imageAttachments);
+            }
+            else
+            {
+                _conversation!.AddUserMessage(messageText);
+            }
 
             var systemPrompt = _promptBuilder!.BuildSystemPromptParts(_cachedContext, _userRules, isAskMode);
             var messages = _conversation.BuildApiMessages();
@@ -429,7 +439,9 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             retryMaxAttempts = config.RetryMaxAttempts,
             retryDelaySeconds = config.RetryDelaySeconds,
             maxToolRounds = config.MaxToolRounds,
-            promptCachingEnabled = config.PromptCachingEnabled
+            promptCachingEnabled = config.PromptCachingEnabled,
+            autoRefreshContext = config.AutoRefreshContext,
+            autoLoadLastConversation = config.AutoLoadLastConversation
         });
     }
 
@@ -454,8 +466,14 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         bool? promptCachingEnabled = null;
         if (data?["promptCachingEnabled"] != null)
             promptCachingEnabled = data["promptCachingEnabled"]!.GetValue<bool>();
+        bool? autoRefreshContext = null;
+        if (data?["autoRefreshContext"] != null)
+            autoRefreshContext = data["autoRefreshContext"]!.GetValue<bool>();
+        bool? autoLoadLastConversation = null;
+        if (data?["autoLoadLastConversation"] != null)
+            autoLoadLastConversation = data["autoLoadLastConversation"]!.GetValue<bool>();
 
-        _configService.SaveConfig(apiKey, model, depth, tokens, theme, retryMaxAttempts, retryDelaySeconds, maxToolRounds, promptCachingEnabled);
+        _configService.SaveConfig(apiKey, model, depth, tokens, theme, retryMaxAttempts, retryDelaySeconds, maxToolRounds, promptCachingEnabled, autoRefreshContext, autoLoadLastConversation);
         SendToWebView("settings_saved", new { success = true });
     }
 
@@ -565,6 +583,22 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         {
             DiagLog($"HandleSaveChatState error: {ex.Message}");
         }
+    }
+
+    private List<ImageAttachment> ParseImageAttachments(JsonObject? data)
+    {
+        var result = new List<ImageAttachment>();
+        var imagesNode = data?["images"];
+        if (imagesNode is not JsonArray imagesArray) return result;
+
+        foreach (var item in imagesArray)
+        {
+            var base64 = item?["base64"]?.GetValue<string>();
+            var mediaType = item?["mediaType"]?.GetValue<string>();
+            if (!string.IsNullOrEmpty(base64) && !string.IsNullOrEmpty(mediaType))
+                result.Add(new ImageAttachment(base64, mediaType));
+        }
+        return result;
     }
 
     /// <summary>

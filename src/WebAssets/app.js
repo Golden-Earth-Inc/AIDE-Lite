@@ -21,6 +21,7 @@
     var cumulativeOutputTokens = 0;
     var currentTheme = 'light';
     var chatHistory = [];
+    var pendingImages = [];
 
     // --- DOM References ---
     var chatArea = document.getElementById('chatArea');
@@ -58,6 +59,10 @@
     var exportCancelBtn = document.getElementById('exportCancelBtn');
     var exportOverlay = document.getElementById('exportOverlay');
     var exportToolActivity = document.getElementById('exportToolActivity');
+    var inputArea = document.getElementById('inputArea');
+    var imagePreview = document.getElementById('imagePreview');
+    var attachImageBtn = document.getElementById('attachImageBtn');
+    var imageFileInput = document.getElementById('imageFileInput');
 
     // --- WebView Bridge (C# <-> JS messaging) ---
     function sendToBackend(type, payload) {
@@ -135,13 +140,15 @@
         var text = chatInput.value.trim();
         if (!text || isStreaming) return;
 
+        var images = pendingImages.slice();
         hideWelcome();
-        appendMessage('user', text);
-        chatHistory.push({ type: 'user', content: text });
+        appendMessage('user', text, images);
+        chatHistory.push({ type: 'user', content: text, images: images });
         chatInput.value = '';
         chatInput.style.height = 'auto';
+        pendingImages = [];
+        renderImagePreviews();
 
-        // Show stop button and processing bar immediately when user sends message
         isStreaming = true;
         retryAttemptCount = 0;
         sendBtn.disabled = true;
@@ -149,7 +156,13 @@
         stopBtn.classList.remove('hidden');
         showProcessingBar('Thinking...');
 
-        sendToBackend('chat', { message: text, mode: modeSelect.value });
+        var payload = { message: text, mode: modeSelect.value };
+        if (images.length > 0) {
+            payload.images = images.map(function (img) {
+                return { base64: img.base64, mediaType: img.mediaType };
+            });
+        }
+        sendToBackend('chat', payload);
     }
 
     function inlineStylesForCopy(clone) {
@@ -220,14 +233,28 @@
         div.appendChild(btn);
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, images) {
         var div = document.createElement('div');
         div.className = 'message ' + role;
         if (role === 'assistant') {
             div.innerHTML = renderMarkdown(content);
             addCopyButton(div, content);
         } else {
-            div.textContent = content;
+            if (images && images.length > 0) {
+                var imgContainer = document.createElement('div');
+                imgContainer.className = 'image-attachments';
+                images.forEach(function (img) {
+                    var imgEl = document.createElement('img');
+                    imgEl.src = img.dataUrl || ('data:' + img.mediaType + ';base64,' + img.base64);
+                    imgEl.alt = img.name || 'Attached image';
+                    imgEl.title = img.name || 'Attached image';
+                    imgContainer.appendChild(imgEl);
+                });
+                div.appendChild(imgContainer);
+            }
+            var textNode = document.createElement('span');
+            textNode.textContent = content;
+            div.appendChild(textNode);
         }
         chatArea.appendChild(div);
         scrollToBottom();
@@ -540,9 +567,19 @@
         historyModal.classList.add('hidden');
     }
 
+    var autoLoadPending = false;
+
     function handleHistoryList(data) {
         if (!data || !data.conversations) return;
         var conversations = data.conversations;
+
+        if (autoLoadPending) {
+            autoLoadPending = false;
+            if (conversations.length > 0) {
+                sendToBackend('load_conversation', { id: conversations[0].id });
+            }
+            return;
+        }
 
         if (conversations.length === 0) {
             historyList.innerHTML = '<p class="history-empty">No saved conversations yet.</p>';
@@ -612,7 +649,7 @@
 
             switch (entry.type) {
                 case 'user':
-                    appendMessage('user', entry.content);
+                    appendMessage('user', entry.content, entry.images);
                     break;
                 case 'assistant':
                     appendMessage('assistant', entry.content);
@@ -656,6 +693,8 @@
         settingsModal.classList.add('hidden');
     }
 
+    var initialSettingsLoaded = false;
+
     function handleLoadSettings(data) {
         if (!data) return;
         if (data.selectedModel) {
@@ -668,8 +707,23 @@
         if (data.retryDelaySeconds != null) document.getElementById('retryDelaySecondsInput').value = data.retryDelaySeconds;
         if (data.maxToolRounds != null) document.getElementById('maxToolRoundsInput').value = data.maxToolRounds;
         if (data.promptCachingEnabled != null) document.getElementById('promptCachingCheckbox').checked = data.promptCachingEnabled;
+        if (data.autoRefreshContext != null) document.getElementById('autoRefreshContextCheckbox').checked = data.autoRefreshContext;
+        if (data.autoLoadLastConversation != null) document.getElementById('autoLoadLastConversationCheckbox').checked = data.autoLoadLastConversation;
         if (data.hasKey) document.getElementById('apiKeyInput').placeholder = '********** (key saved)';
         if (data.theme) applyTheme(data.theme);
+
+        if (!initialSettingsLoaded) {
+            initialSettingsLoaded = true;
+            if (data.autoRefreshContext !== false) {
+                contextDot.className = 'status-dot loading';
+                contextText.textContent = 'Loading context...';
+                sendToBackend('get_context');
+            }
+            if (data.autoLoadLastConversation !== false) {
+                autoLoadPending = true;
+                sendToBackend('get_history');
+            }
+        }
     }
 
     function handleSettingsSaved(data) {
@@ -687,6 +741,8 @@
         var retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
         var maxToolRounds = parseInt(document.getElementById('maxToolRoundsInput').value) || 10;
         var promptCachingEnabled = document.getElementById('promptCachingCheckbox').checked;
+        var autoRefreshContext = document.getElementById('autoRefreshContextCheckbox').checked;
+        var autoLoadLastConversation = document.getElementById('autoLoadLastConversationCheckbox').checked;
 
         sendToBackend('save_settings', {
             apiKey: apiKey,
@@ -697,6 +753,8 @@
             retryDelaySeconds: retryDelaySeconds,
             maxToolRounds: maxToolRounds,
             promptCachingEnabled: promptCachingEnabled,
+            autoRefreshContext: autoRefreshContext,
+            autoLoadLastConversation: autoLoadLastConversation,
             theme: theme
         });
 
@@ -913,6 +971,119 @@
         return div.innerHTML;
     }
 
+    // --- Image Attachment Handling ---
+    var allowedImageTypes = { 'image/jpeg': true, 'image/png': true, 'image/gif': true, 'image/webp': true };
+
+    function addImageFile(file) {
+        if (!allowedImageTypes[file.type]) return;
+        if (file.size > 20 * 1024 * 1024) return; // 20 MB limit
+        var reader = new FileReader();
+        reader.onload = function (e) {
+            var dataUrl = e.target.result;
+            var commaIdx = dataUrl.indexOf(',');
+            var base64 = dataUrl.substring(commaIdx + 1);
+            var mediaType = file.type;
+            pendingImages.push({ base64: base64, mediaType: mediaType, name: file.name, dataUrl: dataUrl });
+            renderImagePreviews();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function renderImagePreviews() {
+        imagePreview.innerHTML = '';
+        if (pendingImages.length === 0) {
+            imagePreview.classList.remove('has-images');
+            return;
+        }
+        imagePreview.classList.add('has-images');
+        pendingImages.forEach(function (img, idx) {
+            var item = document.createElement('div');
+            item.className = 'image-preview-item';
+
+            var thumb = document.createElement('img');
+            thumb.className = 'image-preview-thumb';
+            thumb.src = img.dataUrl;
+            thumb.alt = img.name || 'image';
+            thumb.title = img.name || 'Attached image';
+
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'image-preview-remove';
+            removeBtn.innerHTML = '\u00D7';
+            removeBtn.title = 'Remove image';
+            removeBtn.setAttribute('data-idx', idx);
+            removeBtn.addEventListener('click', function () {
+                var i = parseInt(this.getAttribute('data-idx'), 10);
+                pendingImages.splice(i, 1);
+                renderImagePreviews();
+            });
+
+            item.appendChild(thumb);
+            item.appendChild(removeBtn);
+            imagePreview.appendChild(item);
+        });
+    }
+
+    // Block WebView2 from navigating to dropped files globally —
+    // without this, the browser tries to open the file URL before JS can handle it
+    document.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+    document.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+    });
+
+    // Drag-and-drop on input area (visual feedback + file capture)
+    inputArea.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        inputArea.classList.add('drag-over');
+    });
+    inputArea.addEventListener('dragleave', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        inputArea.classList.remove('drag-over');
+    });
+    inputArea.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        inputArea.classList.remove('drag-over');
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files) {
+            for (var i = 0; i < files.length; i++) {
+                addImageFile(files[i]);
+            }
+        }
+    });
+
+    // Paste images from clipboard
+    chatInput.addEventListener('paste', function (e) {
+        var items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && allowedImageTypes[items[i].type]) {
+                var file = items[i].getAsFile();
+                if (file) addImageFile(file);
+            }
+        }
+    });
+
+    // Attach image via file picker button
+    attachImageBtn.addEventListener('click', function () {
+        imageFileInput.value = '';
+        imageFileInput.click();
+    });
+    imageFileInput.addEventListener('change', function () {
+        var files = imageFileInput.files;
+        if (files) {
+            for (var i = 0; i < files.length; i++) {
+                addImageFile(files[i]);
+            }
+        }
+        imageFileInput.value = '';
+    });
+
     // --- Event Listeners & UI Wiring ---
     modeSelect.addEventListener('change', function () {
         chatInput.placeholder = modeSelect.value === 'ask'
@@ -961,6 +1132,8 @@
         cumulativeInputTokens = 0;
         cumulativeOutputTokens = 0;
         chatHistory = [];
+        pendingImages = [];
+        renderImagePreviews();
         updateTokenBadge();
         resetContextUsage();
         sendToBackend('new_chat');
