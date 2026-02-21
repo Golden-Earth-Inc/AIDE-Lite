@@ -78,7 +78,7 @@ public class ConfigurationService
 
     private const int MaxTokensCeiling = 64000;
 
-    public void SaveConfig(string? apiKey, string? selectedModel, string? contextDepth, int? maxTokens, string? theme = null, int? retryMaxAttempts = null, int? retryDelaySeconds = null)
+    public void SaveConfig(string? apiKey, string? selectedModel, string? contextDepth, int? maxTokens, string? theme = null, int? retryMaxAttempts = null, int? retryDelaySeconds = null, int? maxToolRounds = null)
     {
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
@@ -102,6 +102,9 @@ public class ConfigurationService
 
         if (retryDelaySeconds.HasValue && retryDelaySeconds.Value >= 1)
             _cachedConfig.RetryDelaySeconds = Math.Min(retryDelaySeconds.Value, 600);
+
+        if (maxToolRounds.HasValue && maxToolRounds.Value >= 1)
+            _cachedConfig.MaxToolRounds = Math.Min(maxToolRounds.Value, 50);
 
         SaveToDisk(_cachedConfig);
         _logService.Info("AIDE Lite: Configuration saved");

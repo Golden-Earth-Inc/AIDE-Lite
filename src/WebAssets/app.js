@@ -334,6 +334,8 @@
         if (!data) return;
         var inputTokens = data.inputTokens || 0;
         var outputTokens = data.outputTokens || 0;
+        var cacheCreation = data.cacheCreationTokens || 0;
+        var cacheRead = data.cacheReadTokens || 0;
         cumulativeInputTokens += inputTokens;
         cumulativeOutputTokens += outputTokens;
 
@@ -344,6 +346,14 @@
             '<span class="token-out">' + formatTokens(outputTokens) + ' out</span>',
             '<span class="token-total">' + formatTokens(total) + ' total</span>'
         ];
+
+        if (cacheCreation > 0 || cacheRead > 0) {
+            parts.push('<span class="token-cache">Cache: ' +
+                (cacheRead > 0 ? formatTokens(cacheRead) + ' hit' : '') +
+                (cacheRead > 0 && cacheCreation > 0 ? ', ' : '') +
+                (cacheCreation > 0 ? formatTokens(cacheCreation) + ' written' : '') +
+                '</span>');
+        }
 
         var div = document.createElement('div');
         div.className = 'token-usage';
@@ -549,6 +559,7 @@
         if (data.maxTokens) document.getElementById('maxTokensInput').value = data.maxTokens;
         if (data.retryMaxAttempts != null) document.getElementById('retryMaxAttemptsInput').value = data.retryMaxAttempts;
         if (data.retryDelaySeconds != null) document.getElementById('retryDelaySecondsInput').value = data.retryDelaySeconds;
+        if (data.maxToolRounds != null) document.getElementById('maxToolRoundsInput').value = data.maxToolRounds;
         if (data.hasKey) document.getElementById('apiKeyInput').placeholder = '********** (key saved)';
         if (data.theme) applyTheme(data.theme);
     }
@@ -566,6 +577,7 @@
 
         var retryMaxAttempts = parseInt(document.getElementById('retryMaxAttemptsInput').value) || 20;
         var retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
+        var maxToolRounds = parseInt(document.getElementById('maxToolRoundsInput').value) || 10;
 
         sendToBackend('save_settings', {
             apiKey: apiKey,
@@ -574,6 +586,7 @@
             maxTokens: tokens,
             retryMaxAttempts: retryMaxAttempts,
             retryDelaySeconds: retryDelaySeconds,
+            maxToolRounds: maxToolRounds,
             theme: theme
         });
 

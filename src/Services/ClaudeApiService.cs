@@ -48,9 +48,11 @@ public class ClaudeApiService
     /// <summary>
     /// Send a streaming request to the Claude API with tool definitions.
     /// Retries automatically on rate-limit (429), overloaded (529), and transient 5xx errors.
+    /// Uses prompt caching: system prompt blocks and tools are marked with cache_control
+    /// so repeated content doesn't count toward input token rate limits.
     /// </summary>
     public async Task<ApiResponse> SendStreamingRequestAsync(
-        string systemPrompt,
+        SystemPromptParts systemPrompt,
         List<object> messages,
         List<Dictionary<string, object>>? tools,
         Action<string> onTextDelta,
@@ -70,6 +72,7 @@ public class ClaudeApiService
             var config = _configService.GetConfig();
             var requestJson = BuildRequestJson(systemPrompt, messages, tools, config);
             _logService.Info($"AIDE Lite: [API] Model: {config.SelectedModel}, MaxTokens: {config.MaxTokens}, body: {requestJson.Length} chars");
+            _logService.Info($"AIDE Lite: [API] System prompt sizes: instructions={systemPrompt.StaticInstructions.Length}chars, context={systemPrompt.AppContext.Length}chars");
 
             return await SendWithRetries(apiKey, requestJson, config, onTextDelta, onToolStart, onRetryWait, ct);
         }
@@ -98,16 +101,28 @@ public class ClaudeApiService
 
     // ── Request building ────────────────────────────────────────────────
 
+    private static readonly object CacheBreakpoint = new { type = "ephemeral" };
+
     private static string BuildRequestJson(
-        string systemPrompt, List<object> messages,
+        SystemPromptParts systemPrompt, List<object> messages,
         List<Dictionary<string, object>>? tools, AideLiteConfig config)
     {
+        // System prompt is sent as an array of content blocks, each with cache_control.
+        // Anthropic caches matching prefixes for 5 minutes — subsequent calls in the
+        // same conversation (especially tool-use rounds) get cache hits, which do NOT
+        // count toward the input token rate limit.
+        var systemBlocks = new List<object>
+        {
+            new { type = "text", text = systemPrompt.StaticInstructions, cache_control = CacheBreakpoint },
+            new { type = "text", text = systemPrompt.AppContext, cache_control = CacheBreakpoint }
+        };
+
         var body = new Dictionary<string, object>
         {
             ["model"] = config.SelectedModel,
             ["max_tokens"] = config.MaxTokens,
             ["stream"] = true,
-            ["system"] = systemPrompt,
+            ["system"] = systemBlocks,
             ["messages"] = messages
         };
 
@@ -146,7 +161,11 @@ public class ClaudeApiService
             _logService.Info($"AIDE Lite: [API] HTTP {statusCode} {response.StatusCode}");
 
             if (response.IsSuccessStatusCode)
-                return await ParseStream(response, onTextDelta, onToolStart, ct);
+            {
+                var result = await ParseStream(response, onTextDelta, onToolStart, ct);
+                _logService.Info($"AIDE Lite: [API] Cache stats: creation={result.CacheCreationInputTokens}, read={result.CacheReadInputTokens}, input={result.InputTokens}");
+                return result;
+            }
 
             var errorBody = await response.Content.ReadAsStringAsync(ct);
             _logService.Error($"AIDE Lite: [API] Error body: {errorBody}");
@@ -171,6 +190,7 @@ public class ClaudeApiService
         var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
         request.Headers.Add("x-api-key", apiKey);
         request.Headers.Add("anthropic-version", ApiVersion);
+        request.Headers.Add("anthropic-beta", "prompt-caching-2024-07-31");
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         return request;
     }
@@ -332,9 +352,21 @@ public class ClaudeApiService
 
     private static ApiResponse? OnMessageStart(JsonNode evt, StreamState s)
     {
-        var inputTokens = evt["message"]?["usage"]?["input_tokens"]?.GetValue<int>();
+        var usage = evt["message"]?["usage"];
+        if (usage == null) return null;
+
+        var inputTokens = usage["input_tokens"]?.GetValue<int>();
         if (inputTokens.HasValue)
             s.Result.InputTokens = inputTokens.Value;
+
+        var cacheCreation = usage["cache_creation_input_tokens"]?.GetValue<int>();
+        if (cacheCreation.HasValue)
+            s.Result.CacheCreationInputTokens = cacheCreation.Value;
+
+        var cacheRead = usage["cache_read_input_tokens"]?.GetValue<int>();
+        if (cacheRead.HasValue)
+            s.Result.CacheReadInputTokens = cacheRead.Value;
+
         return null;
     }
 
@@ -390,6 +422,8 @@ public class ApiResponse
     public List<ToolCall> ToolCalls { get; set; } = new();
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
+    public int CacheCreationInputTokens { get; set; }
+    public int CacheReadInputTokens { get; set; }
 
     public bool HasToolCalls => ToolCalls.Count > 0;
 

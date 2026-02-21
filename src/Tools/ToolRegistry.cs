@@ -28,8 +28,10 @@ public class ToolRegistry
     /// <summary>
     /// Build the tools array for the Claude API request.
     /// When includeWriteTools is false, write tools (create/edit/rename/replace) are excluded to save tokens.
+    /// When withCacheControl is true, a cache_control breakpoint is added to the last tool
+    /// so Anthropic caches all tool definitions across requests.
     /// </summary>
-    public List<Dictionary<string, object>> BuildToolDefinitions(bool includeWriteTools = true)
+    public List<Dictionary<string, object>> BuildToolDefinitions(bool includeWriteTools = true, bool withCacheControl = true)
     {
         var definitions = new List<Dictionary<string, object>>();
         foreach (var tool in _tools.Values)
@@ -42,6 +44,10 @@ public class ToolRegistry
                 ["input_schema"] = tool.InputSchema
             });
         }
+
+        if (withCacheControl && definitions.Count > 0)
+            definitions[^1]["cache_control"] = new { type = "ephemeral" };
+
         return definitions;
     }
 }
