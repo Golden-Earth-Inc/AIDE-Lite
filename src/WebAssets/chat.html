@@ -8,8 +8,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self';">
     <title>AIDE Lite</title>
-    <link rel="stylesheet" href="styles.css?v=5">
+    <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
     <div class="app-container">
@@ -23,6 +24,7 @@
             </div>
             <div class="header-actions">
                 <button id="exportBtn" class="icon-btn" title="Export Chat">&#x2B07;</button>
+                <button id="historyBtn" class="icon-btn" title="Chat History">&#x1F4CB;</button>
                 <button id="themeToggleBtn" class="icon-btn" title="Toggle Dark Mode">&#x1F319;</button>
                 <button id="refreshBtn" class="icon-btn" title="Refresh App Context">&#x21bb;</button>
                 <button id="newChatBtn" class="icon-btn" title="New Chat">&#x2795;</button>
@@ -69,9 +71,21 @@
             <span id="toolLabel">Working...</span>
         </div>
 
+        <!-- Context Usage Bar -->
+        <div id="contextUsage" class="context-usage hidden">
+            <div class="context-usage-bar">
+                <div id="contextUsageFill" class="context-usage-fill"></div>
+            </div>
+            <span id="contextUsageLabel" class="context-usage-label">0%</span>
+        </div>
+
         <!-- Input Area -->
         <div class="input-area">
-            <textarea id="chatInput" placeholder="Ask about your app, or request a microflow..." rows="2"></textarea>
+            <select id="modeSelect" class="mode-select" title="Interaction mode">
+                <option value="agent">Agent</option>
+                <option value="ask">Ask</option>
+            </select>
+            <textarea id="chatInput" placeholder="Agent mode — can read and modify your app..." rows="2"></textarea>
             <button id="sendBtn" class="send-btn" title="Send">&#x27A4;</button>
             <button id="stopBtn" class="stop-btn hidden" title="Stop generating">&#x25A0;</button>
         </div>
@@ -90,7 +104,8 @@
             <div class="form-group">
                 <label for="modelSelect">Model</label>
                 <select id="modelSelect">
-                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Recommended)</option>
+                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Recommended)</option>
                     <option value="claude-opus-4-6">Claude Opus 4.6 (Most Intelligent)</option>
                     <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fastest)</option>
                 </select>
@@ -99,12 +114,33 @@
                 <label for="contextDepthSelect">Context Depth</label>
                 <select id="contextDepthSelect">
                     <option value="full">Full App (all modules)</option>
-                    <option value="module">Current Module Only</option>
+                    <option value="summary">Summary (lighter, fewer tokens)</option>
+                    <option value="none">None (tools only)</option>
                 </select>
             </div>
             <div class="form-group">
                 <label for="maxTokensInput">Max Response Tokens</label>
                 <input type="number" id="maxTokensInput" value="8192" min="256" max="128000">
+            </div>
+            <div class="form-group">
+                <label for="retryMaxAttemptsInput">Rate Limit Max Retries</label>
+                <input type="number" id="retryMaxAttemptsInput" value="20" min="0" max="100">
+                <small>How many times to retry on rate limit (0 = no retries).</small>
+            </div>
+            <div class="form-group">
+                <label for="retryDelaySecondsInput">Retry Delay (seconds)</label>
+                <input type="number" id="retryDelaySecondsInput" value="60" min="1" max="600">
+                <small>Seconds to wait between retries (API retry-after header takes priority).</small>
+            </div>
+            <div class="form-group">
+                <label for="maxToolRoundsInput">Max Tool Rounds</label>
+                <input type="number" id="maxToolRoundsInput" value="10" min="1" max="50">
+                <small>Maximum number of tool-use rounds per message (1–50).</small>
+            </div>
+            <div class="form-group">
+                <label for="promptCachingCheckbox">Prompt Caching</label>
+                <input type="checkbox" id="promptCachingCheckbox" checked>
+                <small>Cache system prompt and tools to reduce rate limit usage (~90% savings on repeated calls).</small>
             </div>
             <div class="form-group">
                 <label for="themeSelect">Theme</label>
@@ -116,6 +152,20 @@
             <div class="modal-actions">
                 <button id="saveSettingsBtn" class="primary-btn">Save</button>
                 <button id="cancelSettingsBtn" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Modal -->
+    <div id="historyModal" class="modal hidden">
+        <div class="modal-overlay" id="historyOverlay"></div>
+        <div class="modal-dialog history-dialog">
+            <h3>Chat History</h3>
+            <div id="historyList" class="history-list">
+                <p class="history-empty">No saved conversations yet.</p>
+            </div>
+            <div class="modal-actions">
+                <button id="historyCloseBtn" class="secondary-btn">Close</button>
             </div>
         </div>
     </div>
@@ -140,6 +190,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>

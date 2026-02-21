@@ -6,4 +6,5 @@ obj/
 .chat-history/
 CLAUDE.md
 .claude/
+.cursor/
 docs/

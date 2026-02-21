@@ -188,6 +188,37 @@ body {
 .status-dot.stale { background: #fd7e14; animation: pulse 1.5s infinite; }
 @keyframes pulse { 50% { opacity: 0.4; } }
 
+/* === Context Usage Bar === */
+.context-usage {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 12px;
+    flex-shrink: 0;
+}
+.context-usage-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--bg-surface);
+    overflow: hidden;
+}
+.context-usage-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: #22c55e;
+    transition: width 0.4s ease, background-color 0.4s ease;
+    width: 0%;
+}
+.context-usage-fill.warning { background: #f59e0b; }
+.context-usage-fill.danger { background: #ef4444; }
+.context-usage-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 /* === Chat Area === */
 .chat-area {
     flex: 1;
@@ -242,8 +273,27 @@ body {
     background: var(--msg-assistant-bg);
     border: 1px solid var(--msg-assistant-border);
     border-bottom-left-radius: 4px;
+    position: relative;
 }
 .message.assistant.streaming { border-color: #7c3aed; }
+.copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: var(--bg-surface);
+    border: 1px solid var(--msg-assistant-border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+    color: var(--text-secondary);
+    z-index: 1;
+    line-height: 1;
+}
+.message.assistant:hover .copy-btn { opacity: 0.7; }
+.copy-btn:hover { opacity: 1 !important; }
 
 /* Markdown in messages */
 .message.assistant h1, .message.assistant h2, .message.assistant h3 {
@@ -363,7 +413,23 @@ body {
     background: var(--bg-input-area);
     border-top: 1px solid var(--border-primary);
     flex-shrink: 0;
+    align-items: flex-end;
 }
+.mode-select {
+    padding: 6px 4px;
+    border: 1px solid var(--border-input);
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text-input);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    align-self: flex-end;
+    min-width: 68px;
+}
+.mode-select:focus { border-color: #7c3aed; }
 #chatInput {
     flex: 1;
     border: 1px solid var(--border-input);
@@ -495,6 +561,7 @@ body {
 .token-usage .token-in { color: #6366f1; }
 .token-usage .token-out { color: #8b5cf6; }
 .token-usage .token-total { color: var(--token-total); }
+.token-usage .token-cache { color: #22c55e; font-weight: 500; }
 
 /* === Error message === */
 .error-msg {
@@ -539,4 +606,68 @@ body.dark .success-msg { color: #86efac; }
     width: auto;
     accent-color: #7c3aed;
     cursor: pointer;
+}
+
+/* === History Modal === */
+.history-dialog {
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+}
+.history-list {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+    margin: 8px 0 12px;
+}
+.history-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 24px 0;
+}
+.history-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    transition: background 0.15s;
+}
+.history-item:hover {
+    background: var(--bg-surface);
+}
+.history-item-main {
+    flex: 1;
+    cursor: pointer;
+    min-width: 0;
+}
+.history-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.history-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+.history-delete-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: color 0.15s, background 0.15s;
+}
+.history-delete-btn:hover {
+    color: #dc2626;
+    background: var(--bg-error);
 }

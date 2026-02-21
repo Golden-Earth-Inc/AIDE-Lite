@@ -48,6 +48,10 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     private AppContextExtractor? _contextExtractor;
     private AppContextDto? _cachedContext;
     private string? _userRules;
+    private ConversationHistoryService? _historyService;
+    private string? _currentConversationId;
+    private string? _currentConversationTitle;
+    private DateTime _lastSettingsSave = DateTime.MinValue;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -127,6 +131,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         _claudeApi = new ClaudeApiService(_httpClientService, _configService, _logService);
         _conversation ??= new ConversationManager();
         _promptBuilder = new PromptBuilder();
+        _historyService ??= new ConversationHistoryService(_logService);
         _lastInitializedModel = model;
 
         if (model != null)
@@ -191,6 +196,18 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 case "cancel":
                     HandleCancel();
                     break;
+                case "get_history":
+                    HandleGetHistory();
+                    break;
+                case "load_conversation":
+                    HandleLoadConversation(data);
+                    break;
+                case "delete_conversation":
+                    HandleDeleteConversation(data);
+                    break;
+                case "save_chat_state":
+                    HandleSaveChatState(data);
+                    break;
                 case "MessageListenerRegistered":
                     DiagLog("OnMessageReceived: JS message listener registered - bridge ready");
                     break;
@@ -202,7 +219,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         catch (Exception ex)
         {
             DiagLog($"OnMessageReceived: EXCEPTION: {ex}");
-            SendToWebView("error", new { message = ex.Message, code = "internal" });
+            SendToWebView("error", new { message = "An internal error occurred. Check the AIDE Lite log for details.", code = "internal" });
         }
     }
 
@@ -235,21 +252,42 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             DiagLog($"[2/6] Message: \"{messageText.Substring(0, Math.Min(messageText.Length, 50))}\"");
 
             EnsureServicesInitialized();
+
+            if (_currentConversationId == null)
+            {
+                _currentConversationId = Guid.NewGuid().ToString("N");
+                _currentConversationTitle = messageText.Length > 60
+                    ? messageText[..60] + "..."
+                    : messageText;
+            }
             DiagLog("[3/6] Services initialized");
+
+            var rawMode = data?["mode"]?.GetValue<string>();
+            // Validate mode server-side — default to "ask" (least permissive) for unknown values
+            var mode = rawMode is "agent" or "ask" ? rawMode : "ask";
+            var isAskMode = mode == "ask";
 
             _conversation!.AddUserMessage(messageText);
 
-            var systemPrompt = _promptBuilder!.BuildSystemPrompt(_cachedContext, _userRules);
+            var systemPrompt = _promptBuilder!.BuildSystemPromptParts(_cachedContext, _userRules, isAskMode);
             var messages = _conversation.BuildApiMessages();
 
-            var tools = _toolRegistry?.BuildToolDefinitions();
-            DiagLog($"[4/6] Sending to Claude API (messages: {messages.Count}, tools: {tools?.Count ?? 0}, context: {(_cachedContext != null ? "loaded" : "none")})");
+            var config = _configService.GetConfig();
+            var cachingEnabled = config.PromptCachingEnabled;
+            List<Dictionary<string, object>>? tools = isAskMode
+                ? _toolRegistry?.BuildToolDefinitions(includeWriteTools: false, withCacheControl: cachingEnabled)
+                : _toolRegistry?.BuildToolDefinitions(withCacheControl: cachingEnabled);
+            DiagLog($"[4/6] Sending to Claude API (mode: {mode}, messages: {messages.Count}, tools: {tools?.Count ?? 0}, context: {(_cachedContext != null ? "loaded" : "none")}, caching: {cachingEnabled})");
 
             // Tool use loop — Claude may request multiple rounds of tool calls before producing a final answer.
             // Each round: send conversation -> receive response -> execute tool calls -> append results -> repeat.
-            const int maxToolRounds = 5;
+            var maxToolRounds = config.MaxToolRounds;
             var totalInputTokens = 0;
             var totalOutputTokens = 0;
+            var totalCacheCreation = 0;
+            var totalCacheRead = 0;
+            var lastRoundInputTokens = 0;
+            var lastRoundOutputTokens = 0;
             var modelWasModified = false;
 
             for (var round = 0; round < maxToolRounds; round++)
@@ -261,11 +299,16 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     messages,
                     tools,
                     onTextDelta: token => SendToWebView("chat_streaming", new { token, done = false }),
-                    onToolStart: (toolName, toolId) => SendToWebView("tool_start", new { toolName }));
+                    onToolStart: (toolName, toolId) => SendToWebView("tool_start", new { toolName }),
+                    onRetryWait: (attempt, delaySec, maxRetries) => SendToWebView("retry_wait", new { attempt, delaySec, maxRetries }));
 
                 totalInputTokens += response.InputTokens;
                 totalOutputTokens += response.OutputTokens;
-                DiagLog($"[5/6] Round {round + 1}: success={response.IsSuccess}, stop={response.StopReason}, text={response.FullText?.Length ?? 0}chars, tools={response.ToolCalls.Count}, tokens(in={response.InputTokens},out={response.OutputTokens},totalIn={totalInputTokens},totalOut={totalOutputTokens})");
+                totalCacheCreation += response.CacheCreationInputTokens;
+                totalCacheRead += response.CacheReadInputTokens;
+                lastRoundInputTokens = response.InputTokens;
+                lastRoundOutputTokens = response.OutputTokens;
+                DiagLog($"[5/6] Round {round + 1}: success={response.IsSuccess}, stop={response.StopReason}, text={response.FullText?.Length ?? 0}chars, tools={response.ToolCalls.Count}, tokens(in={response.InputTokens},out={response.OutputTokens},cacheWrite={response.CacheCreationInputTokens},cacheRead={response.CacheReadInputTokens},totalIn={totalInputTokens},totalOut={totalOutputTokens})");
 
                 if (!response.IsSuccess)
                 {
@@ -280,7 +323,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     if (!string.IsNullOrEmpty(response.FullText))
                         _conversation.AddAssistantMessage(response.FullText);
                     SendToWebView("chat_streaming", new { token = "", done = true });
-                    SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens });
+                    SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead, contextUsedTokens = lastRoundInputTokens + lastRoundOutputTokens, contextLimitTokens = GetContextLimit(config.SelectedModel) });
                     if (modelWasModified) SendToWebView("model_changed", new { message = "Model was modified. Click ↻ to refresh context for future requests." });
                     return;
                 }
@@ -292,7 +335,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 var toolResults = new List<(string ToolUseId, string Content, bool IsError)>();
                 foreach (var toolCall in response.ToolCalls)
                 {
-                    var toolResult = _toolExecutor!.Execute(toolCall.Name, toolCall.InputJson);
+                    var toolResult = _toolExecutor!.Execute(toolCall.Name, toolCall.InputJson, isAskMode);
                     SendToWebView("tool_result", new
                     {
                         toolName = toolCall.Name,
@@ -330,16 +373,16 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 messages = _conversation.BuildApiMessages();
             }
 
-            DiagLog($"[6/6] Max tool rounds (5) reached. Total tokens: in={totalInputTokens}, out={totalOutputTokens}");
-            SendToWebView("chat_streaming", new { token = "\n\n*[Reached maximum tool rounds. Break complex tasks into smaller steps.]*", done = false });
+            DiagLog($"[6/6] Max tool rounds ({maxToolRounds}) reached. Total tokens: in={totalInputTokens}, out={totalOutputTokens}, cacheWrite={totalCacheCreation}, cacheRead={totalCacheRead}");
+            SendToWebView("chat_streaming", new { token = "\n\n*[Reached maximum tool rounds (" + maxToolRounds + "). Break complex tasks into smaller steps.]*", done = false });
             SendToWebView("chat_streaming", new { token = "", done = true });
-            SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens });
+            SendToWebView("token_usage", new { inputTokens = totalInputTokens, outputTokens = totalOutputTokens, cacheCreationTokens = totalCacheCreation, cacheReadTokens = totalCacheRead, contextUsedTokens = lastRoundInputTokens + lastRoundOutputTokens, contextLimitTokens = GetContextLimit(config.SelectedModel) });
             if (modelWasModified) SendToWebView("model_changed", new { message = "Model was modified. Click ↻ to refresh context for future requests." });
         }
         catch (Exception ex)
         {
             DiagLog($"[ERROR] Chat exception: {ex}");
-            SendToWebView("error", new { message = $"Error: {ex.Message}", code = "internal" });
+            SendToWebView("error", new { message = "An error occurred while processing your request. Check the AIDE Lite log for details.", code = "internal" });
             SendToWebView("chat_streaming", new { token = "", done = true });
         }
         finally
@@ -372,7 +415,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         catch (Exception ex)
         {
             _logService.Error($"AIDE Lite: Failed to load context: {ex.Message}");
-            SendToWebView("error", new { message = $"Failed to load context: {ex.Message}", code = "context_error" });
+            SendToWebView("error", new { message = "Failed to load context. Check the AIDE Lite log for details.", code = "context_error" });
         }
     }
 
@@ -385,12 +428,24 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             selectedModel = config.SelectedModel,
             contextDepth = config.ContextDepth,
             maxTokens = config.MaxTokens,
-            theme = config.Theme
+            theme = config.Theme,
+            retryMaxAttempts = config.RetryMaxAttempts,
+            retryDelaySeconds = config.RetryDelaySeconds,
+            maxToolRounds = config.MaxToolRounds,
+            promptCachingEnabled = config.PromptCachingEnabled
         });
     }
 
     private void HandleSaveSettings(JsonObject? data)
     {
+        // Rate-limit settings saves to prevent file contention from rapid clicks
+        if ((DateTime.UtcNow - _lastSettingsSave).TotalSeconds < 2)
+        {
+            DiagLog("HandleSaveSettings: throttled (< 2s since last save)");
+            return;
+        }
+        _lastSettingsSave = DateTime.UtcNow;
+
         var apiKey = data?["apiKey"]?.GetValue<string>();
         var model = data?["selectedModel"]?.GetValue<string>();
         var depth = data?["contextDepth"]?.GetValue<string>();
@@ -398,8 +453,20 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         int? tokens = null;
         if (data?["maxTokens"] != null)
             tokens = data["maxTokens"]!.GetValue<int>();
+        int? retryMaxAttempts = null;
+        if (data?["retryMaxAttempts"] != null)
+            retryMaxAttempts = data["retryMaxAttempts"]!.GetValue<int>();
+        int? retryDelaySeconds = null;
+        if (data?["retryDelaySeconds"] != null)
+            retryDelaySeconds = data["retryDelaySeconds"]!.GetValue<int>();
+        int? maxToolRounds = null;
+        if (data?["maxToolRounds"] != null)
+            maxToolRounds = data["maxToolRounds"]!.GetValue<int>();
+        bool? promptCachingEnabled = null;
+        if (data?["promptCachingEnabled"] != null)
+            promptCachingEnabled = data["promptCachingEnabled"]!.GetValue<bool>();
 
-        _configService.SaveConfig(apiKey, model, depth, tokens, theme);
+        _configService.SaveConfig(apiKey, model, depth, tokens, theme, retryMaxAttempts, retryDelaySeconds, maxToolRounds, promptCachingEnabled);
         SendToWebView("settings_saved", new { success = true });
     }
 
@@ -408,6 +475,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         _claudeApi?.Cancel();
         _isChatProcessing = false;
         _conversation?.Clear();
+        _currentConversationId = null;
+        _currentConversationTitle = null;
         _logService.Info("AIDE Lite: Chat cleared");
     }
 
@@ -415,6 +484,103 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     {
         _claudeApi?.Cancel();
         _logService.Info("AIDE Lite: Request cancelled");
+    }
+
+    private void HandleGetHistory()
+    {
+        EnsureServicesInitialized();
+        var list = _historyService!.GetConversationList();
+        SendToWebView("history_list", new { conversations = list });
+    }
+
+    private void HandleLoadConversation(JsonObject? data)
+    {
+        var id = data?["id"]?.GetValue<string>();
+        if (string.IsNullOrEmpty(id)) return;
+
+        // Cancel any in-flight request before switching conversations
+        if (_isChatProcessing)
+        {
+            _claudeApi?.Cancel();
+            _isChatProcessing = false;
+        }
+
+        EnsureServicesInitialized();
+        var conversation = _historyService!.LoadConversation(id);
+        if (conversation == null)
+        {
+            SendToWebView("error", new { message = "Conversation not found.", code = "history_error" });
+            return;
+        }
+
+        _conversation!.RestoreFromJson(conversation.ApiMessagesJson);
+        _currentConversationId = conversation.Id;
+        _currentConversationTitle = conversation.Title;
+
+        SendToWebView("conversation_loaded", new
+        {
+            id = conversation.Id,
+            title = conversation.Title,
+            displayHistory = conversation.DisplayHistory
+        });
+    }
+
+    private void HandleDeleteConversation(JsonObject? data)
+    {
+        var id = data?["id"]?.GetValue<string>();
+        if (string.IsNullOrEmpty(id)) return;
+
+        EnsureServicesInitialized();
+        _historyService!.DeleteConversation(id);
+
+        if (_currentConversationId == id)
+        {
+            _currentConversationId = null;
+            _currentConversationTitle = null;
+        }
+
+        HandleGetHistory();
+    }
+
+    private void HandleSaveChatState(JsonObject? data)
+    {
+        if (_currentConversationId == null || _conversation == null || _historyService == null)
+            return;
+
+        try
+        {
+            var displayHistoryNode = data?["displayHistory"]?.AsArray();
+            var displayHistory = new List<DisplayHistoryEntry>();
+
+            if (displayHistoryNode != null)
+            {
+                foreach (var entry in displayHistoryNode)
+                {
+                    if (entry == null) continue;
+                    displayHistory.Add(new DisplayHistoryEntry
+                    {
+                        Type = entry["type"]?.GetValue<string>() ?? "",
+                        Content = entry["content"]?.GetValue<string>() ?? "",
+                        ToolName = entry["toolName"]?.GetValue<string>()
+                    });
+                }
+            }
+
+            var existing = _historyService.LoadConversation(_currentConversationId);
+
+            _historyService.SaveConversation(new SavedConversation
+            {
+                Id = _currentConversationId,
+                Title = _currentConversationTitle ?? "Untitled",
+                CreatedAt = existing?.CreatedAt ?? DateTime.UtcNow,
+                DisplayHistory = displayHistory,
+                ApiMessagesJson = _conversation.SerializeMessages()
+            });
+        }
+        catch (Exception ex)
+        {
+            DiagLog($"HandleSaveChatState error: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -459,14 +625,20 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         }
     }
 
+    // All currently-supported Claude models have 200K context windows
+    private static int GetContextLimit(string model) => 200_000;
+
     /// <summary>
     /// Clean up resources when the pane is closed.
     /// </summary>
     internal void Cleanup()
     {
         _claudeApi?.Cancel();
+        _isChatProcessing = false;
         _conversation?.Clear();
         _cachedContext = null;
+        _currentConversationId = null;
+        _currentConversationTitle = null;
         if (_webView != null)
         {
             _webView.MessageReceived -= OnMessageReceived;

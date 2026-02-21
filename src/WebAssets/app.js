@@ -25,6 +25,7 @@
     // --- DOM References ---
     var chatArea = document.getElementById('chatArea');
     var chatInput = document.getElementById('chatInput');
+    var modeSelect = document.getElementById('modeSelect');
     var sendBtn = document.getElementById('sendBtn');
     var refreshBtn = document.getElementById('refreshBtn');
     var newChatBtn = document.getElementById('newChatBtn');
@@ -43,6 +44,14 @@
     var processingLabel = document.getElementById('processingLabel');
     var themeToggleBtn = document.getElementById('themeToggleBtn');
     var themeSelect = document.getElementById('themeSelect');
+    var historyBtn = document.getElementById('historyBtn');
+    var historyModal = document.getElementById('historyModal');
+    var historyList = document.getElementById('historyList');
+    var historyCloseBtn = document.getElementById('historyCloseBtn');
+    var historyOverlay = document.getElementById('historyOverlay');
+    var contextUsage = document.getElementById('contextUsage');
+    var contextUsageFill = document.getElementById('contextUsageFill');
+    var contextUsageLabel = document.getElementById('contextUsageLabel');
     var exportBtn = document.getElementById('exportBtn');
     var exportModal = document.getElementById('exportModal');
     var exportDownloadBtn = document.getElementById('exportDownloadBtn');
@@ -100,6 +109,15 @@
             case 'token_usage':
                 handleTokenUsage(data);
                 break;
+            case 'retry_wait':
+                handleRetryWait(data);
+                break;
+            case 'history_list':
+                handleHistoryList(data);
+                break;
+            case 'conversation_loaded':
+                handleConversationLoaded(data);
+                break;
             case 'error':
                 handleError(data);
                 break;
@@ -125,12 +143,84 @@
 
         // Show stop button and processing bar immediately when user sends message
         isStreaming = true;
+        retryAttemptCount = 0;
         sendBtn.disabled = true;
         sendBtn.classList.add('hidden');
         stopBtn.classList.remove('hidden');
         showProcessingBar('Thinking...');
 
-        sendToBackend('chat', { message: text });
+        sendToBackend('chat', { message: text, mode: modeSelect.value });
+    }
+
+    function inlineStylesForCopy(clone) {
+        clone.querySelectorAll('pre').forEach(function (el) {
+            el.style.cssText = 'background:#1e1e2e;color:#cdd6f4;padding:10px;border-radius:6px;overflow-x:auto;margin:6px 0;font-family:"Cascadia Code","Consolas",monospace;font-size:12px;';
+        });
+        clone.querySelectorAll('pre code').forEach(function (el) {
+            el.style.cssText = 'background:none;padding:0;color:inherit;font-family:inherit;font-size:inherit;';
+        });
+        clone.querySelectorAll('code').forEach(function (el) {
+            if (el.parentElement && el.parentElement.tagName === 'PRE') return;
+            el.style.cssText = 'background:#f0f0f0;padding:1px 4px;border-radius:3px;font-family:"Cascadia Code","Consolas",monospace;font-size:12px;';
+        });
+        clone.querySelectorAll('h1,h2,h3').forEach(function (el) {
+            el.style.cssText = 'margin:8px 0 4px;font-weight:bold;';
+        });
+        clone.querySelectorAll('table').forEach(function (el) {
+            el.style.cssText = 'border-collapse:collapse;margin:6px 0;font-size:12px;width:100%;';
+        });
+        clone.querySelectorAll('th,td').forEach(function (el) {
+            el.style.cssText = 'border:1px solid #ddd;padding:4px 8px;text-align:left;';
+        });
+        clone.querySelectorAll('th').forEach(function (el) {
+            el.style.fontWeight = '600';
+            el.style.background = '#f5f5f5';
+        });
+        clone.querySelectorAll('blockquote').forEach(function (el) {
+            el.style.cssText = 'border-left:3px solid #7c3aed;padding-left:10px;margin:6px 0;color:#555;';
+        });
+        clone.querySelectorAll('strong').forEach(function (el) {
+            el.style.fontWeight = 'bold';
+        });
+        clone.querySelectorAll('em').forEach(function (el) {
+            el.style.fontStyle = 'italic';
+        });
+        clone.querySelectorAll('ul,ol').forEach(function (el) {
+            el.style.cssText = 'margin:4px 0;padding-left:20px;';
+        });
+        clone.querySelectorAll('a').forEach(function (el) {
+            el.style.cssText = 'color:#7c3aed;text-decoration:underline;';
+        });
+    }
+
+    function addCopyButton(div, markdown) {
+        div.dataset.md = markdown;
+        var btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.title = 'Copy (rich text + markdown)';
+        btn.innerHTML = '&#x2398;';
+        btn.addEventListener('click', function () {
+            var md = div.dataset.md;
+            var clone = div.cloneNode(true);
+            var cloneBtn = clone.querySelector('.copy-btn');
+            if (cloneBtn) cloneBtn.remove();
+            inlineStylesForCopy(clone);
+
+            var styledHtml = '<div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;color:#1a1a2e;">' + clone.innerHTML + '</div>';
+            var htmlBlob = new Blob([styledHtml], { type: 'text/html' });
+            var textBlob = new Blob([md], { type: 'text/plain' });
+
+            navigator.clipboard.write([
+                new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
+            ]).then(function () {
+                btn.textContent = '\u2713';
+                setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
+            }).catch(function () {
+                btn.textContent = '!';
+                setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
+            });
+        });
+        div.appendChild(btn);
     }
 
     function appendMessage(role, content) {
@@ -138,6 +228,7 @@
         div.className = 'message ' + role;
         if (role === 'assistant') {
             div.innerHTML = renderMarkdown(content);
+            addCopyButton(div, content);
         } else {
             div.textContent = content;
         }
@@ -205,9 +296,15 @@
     }
 
     function endStream() {
+        if (retryCountdownInterval) {
+            clearInterval(retryCountdownInterval);
+            retryCountdownInterval = null;
+        }
+        retryAttemptCount = 0;
         if (streamElement) {
             streamElement.classList.remove('streaming');
             streamElement.innerHTML = renderMarkdown(streamBuffer);
+            if (streamBuffer) addCopyButton(streamElement, streamBuffer);
         }
         if (streamBuffer) {
             chatHistory.push({ type: 'assistant', content: streamBuffer });
@@ -220,6 +317,12 @@
         stopBtn.classList.add('hidden');
         hideToolActivity();
         hideProcessingBar();
+        autoSaveChatState();
+    }
+
+    function autoSaveChatState() {
+        if (chatHistory.length === 0) return;
+        sendToBackend('save_chat_state', { displayHistory: chatHistory });
     }
 
     // --- Processing Bar ---
@@ -308,24 +411,51 @@
         if (!data) return;
         var inputTokens = data.inputTokens || 0;
         var outputTokens = data.outputTokens || 0;
+        var cacheCreation = data.cacheCreationTokens || 0;
+        var cacheRead = data.cacheReadTokens || 0;
         cumulativeInputTokens += inputTokens;
         cumulativeOutputTokens += outputTokens;
 
         var total = inputTokens + outputTokens;
-        var parts = [
-            '<span class="token-label">Tokens:</span>',
-            '<span class="token-in">' + formatTokens(inputTokens) + ' in</span>',
-            '<span class="token-out">' + formatTokens(outputTokens) + ' out</span>',
-            '<span class="token-total">' + formatTokens(total) + ' total</span>'
-        ];
+
+        function makeSpan(cls, text) {
+            var s = document.createElement('span');
+            s.className = cls;
+            s.textContent = text;
+            return s;
+        }
+
+        function makeSep() {
+            return document.createTextNode(' \u00B7 ');
+        }
 
         var div = document.createElement('div');
         div.className = 'token-usage';
-        div.innerHTML = parts.join(' · ');
+        div.appendChild(makeSpan('token-label', 'Tokens:'));
+        div.appendChild(makeSep());
+        div.appendChild(makeSpan('token-in', formatTokens(inputTokens) + ' in'));
+        div.appendChild(makeSep());
+        div.appendChild(makeSpan('token-out', formatTokens(outputTokens) + ' out'));
+        div.appendChild(makeSep());
+        div.appendChild(makeSpan('token-total', formatTokens(total) + ' total'));
+
+        if (cacheCreation > 0 || cacheRead > 0) {
+            var cacheText = 'Cache: ' +
+                (cacheRead > 0 ? formatTokens(cacheRead) + ' hit' : '') +
+                (cacheRead > 0 && cacheCreation > 0 ? ', ' : '') +
+                (cacheCreation > 0 ? formatTokens(cacheCreation) + ' written' : '');
+            div.appendChild(makeSep());
+            div.appendChild(makeSpan('token-cache', cacheText));
+        }
         chatArea.appendChild(div);
         scrollToBottom();
 
         updateTokenBadge();
+
+        if (data.contextUsedTokens && data.contextLimitTokens) {
+            updateContextUsage(data.contextUsedTokens, data.contextLimitTokens);
+        }
+
         chatHistory.push({ type: 'tokens', content: 'Tokens: ' + formatTokens(inputTokens) + ' in, ' + formatTokens(outputTokens) + ' out, ' + formatTokens(total) + ' total' });
     }
 
@@ -346,6 +476,62 @@
         }
     }
 
+    function updateContextUsage(used, limit) {
+        if (!contextUsage || !contextUsageFill || !contextUsageLabel) return;
+        if (!limit || limit <= 0) return;
+        var pct = Math.min(Math.round((used / limit) * 100), 100);
+        contextUsageFill.style.width = pct + '%';
+
+        if (pct >= 80) {
+            contextUsageFill.className = 'context-usage-fill danger';
+        } else if (pct >= 50) {
+            contextUsageFill.className = 'context-usage-fill warning';
+        } else {
+            contextUsageFill.className = 'context-usage-fill';
+        }
+
+        contextUsageLabel.textContent = pct + '% (' + formatTokens(used) + ' / ' + formatTokens(limit) + ')';
+        contextUsage.classList.remove('hidden');
+    }
+
+    function resetContextUsage() {
+        if (!contextUsage) return;
+        contextUsage.classList.add('hidden');
+        if (contextUsageFill) {
+            contextUsageFill.style.width = '0%';
+            contextUsageFill.className = 'context-usage-fill';
+        }
+        if (contextUsageLabel) contextUsageLabel.textContent = '0%';
+    }
+
+    // --- Retry Wait (rate limit / overload automatic retry) ---
+    var retryCountdownInterval = null;
+    var retryAttemptCount = 0;
+
+    function handleRetryWait(data) {
+        if (!data) return;
+        retryAttemptCount++;
+        var attempt = retryAttemptCount;
+        var totalSec = data.delaySec || 15;
+        var maxRetries = data.maxRetries || 20;
+        var remaining = totalSec;
+
+        if (retryCountdownInterval) clearInterval(retryCountdownInterval);
+
+        showProcessingBar('Rate limited — retrying in ' + remaining + 's (attempt ' + attempt + '/' + maxRetries + ')');
+
+        retryCountdownInterval = setInterval(function () {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(retryCountdownInterval);
+                retryCountdownInterval = null;
+                showProcessingBar('Retrying...');
+            } else {
+                updateProcessingLabel('Rate limited — retrying in ' + remaining + 's (attempt ' + attempt + '/' + maxRetries + ')');
+            }
+        }, 1000);
+    }
+
     // --- Error ---
     function handleError(data) {
         if (!data) return;
@@ -358,6 +544,141 @@
         scrollToBottom();
         sendBtn.disabled = false;
         chatHistory.push({ type: 'error', content: msg });
+    }
+
+    // --- History ---
+    function openHistory() {
+        historyModal.classList.remove('hidden');
+        sendToBackend('get_history');
+    }
+
+    function closeHistory() {
+        historyModal.classList.add('hidden');
+    }
+
+    function handleHistoryList(data) {
+        if (!data || !data.conversations) return;
+        var conversations = data.conversations;
+
+        historyList.textContent = '';
+
+        if (conversations.length === 0) {
+            var emptyP = document.createElement('p');
+            emptyP.className = 'history-empty';
+            emptyP.textContent = 'No saved conversations yet.';
+            historyList.appendChild(emptyP);
+            return;
+        }
+
+        for (var i = 0; i < conversations.length; i++) {
+            var conv = conversations[i];
+            var date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            });
+            var title = conv.title || 'Untitled';
+            if (title.length > 70) title = title.substring(0, 70) + '...';
+            var msgCount = conv.messageCount || 0;
+
+            var item = document.createElement('div');
+            item.className = 'history-item';
+            item.dataset.id = conv.id;
+
+            var main = document.createElement('div');
+            main.className = 'history-item-main';
+
+            var titleDiv = document.createElement('div');
+            titleDiv.className = 'history-item-title';
+            titleDiv.textContent = title;
+
+            var metaDiv = document.createElement('div');
+            metaDiv.className = 'history-item-meta';
+            metaDiv.textContent = date + ' \u00B7 ' + msgCount + ' messages';
+
+            main.appendChild(titleDiv);
+            main.appendChild(metaDiv);
+
+            var delBtn = document.createElement('button');
+            delBtn.className = 'history-delete-btn';
+            delBtn.dataset.id = conv.id;
+            delBtn.title = 'Delete';
+            delBtn.innerHTML = '&#x2715;';
+
+            item.appendChild(main);
+            item.appendChild(delBtn);
+            historyList.appendChild(item);
+
+            main.addEventListener('click', (function (convId) {
+                return function () {
+                    closeHistory();
+                    sendToBackend('load_conversation', { id: convId });
+                };
+            })(conv.id));
+
+            delBtn.addEventListener('click', (function (convId) {
+                return function (e) {
+                    e.stopPropagation();
+                    var el = this.closest('.history-item');
+                    if (el) el.remove();
+                    sendToBackend('delete_conversation', { id: convId });
+                };
+            })(conv.id));
+        }
+    }
+
+    function handleConversationLoaded(data) {
+        if (!data || !data.displayHistory) return;
+
+        if (isStreaming) {
+            sendToBackend('cancel');
+            endStream();
+        }
+
+        chatArea.innerHTML = '';
+        chatHistory = [];
+        cumulativeInputTokens = 0;
+        cumulativeOutputTokens = 0;
+        sendBtn.disabled = false;
+        resetContextUsage();
+
+        var history = data.displayHistory;
+        for (var i = 0; i < history.length; i++) {
+            var entry = history[i];
+            chatHistory.push(entry);
+
+            switch (entry.type) {
+                case 'user':
+                    appendMessage('user', entry.content);
+                    break;
+                case 'assistant':
+                    appendMessage('assistant', entry.content);
+                    break;
+                case 'tool_start':
+                    break;
+                case 'tool_result':
+                    break;
+                case 'success':
+                    var sdiv = document.createElement('div');
+                    sdiv.className = 'success-msg';
+                    sdiv.textContent = entry.content;
+                    chatArea.appendChild(sdiv);
+                    break;
+                case 'error':
+                    var ediv = document.createElement('div');
+                    ediv.className = 'error-msg';
+                    ediv.textContent = entry.content;
+                    chatArea.appendChild(ediv);
+                    break;
+                case 'tokens':
+                    var tdiv = document.createElement('div');
+                    tdiv.className = 'token-usage';
+                    tdiv.textContent = entry.content;
+                    chatArea.appendChild(tdiv);
+                    break;
+            }
+        }
+
+        scrollToBottom();
+        updateTokenBadge();
     }
 
     // --- Settings ---
@@ -378,6 +699,10 @@
         }
         if (data.contextDepth) document.getElementById('contextDepthSelect').value = data.contextDepth;
         if (data.maxTokens) document.getElementById('maxTokensInput').value = data.maxTokens;
+        if (data.retryMaxAttempts != null) document.getElementById('retryMaxAttemptsInput').value = data.retryMaxAttempts;
+        if (data.retryDelaySeconds != null) document.getElementById('retryDelaySecondsInput').value = data.retryDelaySeconds;
+        if (data.maxToolRounds != null) document.getElementById('maxToolRoundsInput').value = data.maxToolRounds;
+        if (data.promptCachingEnabled != null) document.getElementById('promptCachingCheckbox').checked = data.promptCachingEnabled;
         if (data.hasKey) document.getElementById('apiKeyInput').placeholder = '********** (key saved)';
         if (data.theme) applyTheme(data.theme);
     }
@@ -393,11 +718,21 @@
         var tokens = parseInt(document.getElementById('maxTokensInput').value) || 8192;
         var theme = themeSelect ? themeSelect.value : currentTheme;
 
+        var retryMaxAttemptsVal = parseInt(document.getElementById('retryMaxAttemptsInput').value);
+        var retryMaxAttempts = isNaN(retryMaxAttemptsVal) ? 20 : retryMaxAttemptsVal;
+        var retryDelaySeconds = parseInt(document.getElementById('retryDelaySecondsInput').value) || 60;
+        var maxToolRounds = parseInt(document.getElementById('maxToolRoundsInput').value) || 10;
+        var promptCachingEnabled = document.getElementById('promptCachingCheckbox').checked;
+
         sendToBackend('save_settings', {
             apiKey: apiKey,
             selectedModel: model,
             contextDepth: depth,
             maxTokens: tokens,
+            retryMaxAttempts: retryMaxAttempts,
+            retryDelaySeconds: retryDelaySeconds,
+            maxToolRounds: maxToolRounds,
+            promptCachingEnabled: promptCachingEnabled,
             theme: theme
         });
 
@@ -408,6 +743,7 @@
     function updateModelBadge(model) {
         var labels = {
             'claude-sonnet-4-5-20250929': 'Sonnet 4.5',
+            'claude-sonnet-4-6': 'Sonnet 4.6',
             'claude-opus-4-6': 'Opus 4.6',
             'claude-haiku-4-5-20251001': 'Haiku 4.5'
         };
@@ -491,7 +827,7 @@
         }
 
         lines.push('---');
-        lines.push('*Exported from AIDE Lite v1.1.0*');
+        lines.push('*Exported from AIDE Lite v1.1.1*');
 
         var markdown = lines.join('\n');
         var blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
@@ -509,20 +845,35 @@
     // --- Markdown Rendering ---
     // Lightweight regex-based Markdown-to-HTML converter. Handles code blocks,
     // inline formatting, headers, lists, tables, blockquotes, and links.
-    // Inline code content is HTML-escaped to prevent XSS.
+    // All text content is HTML-escaped before being wrapped in HTML tags to prevent XSS.
     function renderMarkdown(text) {
         if (!text) return '';
+
+        // Phase 1: Extract code blocks and inline code into placeholders so they survive escaping
+        var codeBlocks = [];
         var html = text;
 
-        // Code blocks (```lang\n...\n```)
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (m, lang, code) {
-            return '<pre><code class="language-' + (lang || '') + '">' + escapeHtml(code) + '</code></pre>';
+            var idx = codeBlocks.length;
+            codeBlocks.push('<pre><code class="language-' + (lang || '') + '">' + escapeHtml(code) + '</code></pre>');
+            return '\x00CODEBLOCK' + idx + '\x00';
         });
 
-        // Inline code (escape HTML inside backticks to prevent XSS)
         html = html.replace(/`([^`]+)`/g, function (m, code) {
-            return '<code>' + escapeHtml(code) + '</code>';
+            var idx = codeBlocks.length;
+            codeBlocks.push('<code>' + escapeHtml(code) + '</code>');
+            return '\x00CODEBLOCK' + idx + '\x00';
         });
+
+        // Phase 2: Escape all remaining text to prevent XSS
+        html = escapeHtml(html);
+
+        // Phase 3: Restore code block placeholders
+        html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, function (m, idx) {
+            return codeBlocks[parseInt(idx)] || '';
+        });
+
+        // Phase 4: Apply markdown formatting on escaped text (safe — all user content is escaped)
 
         // Bold
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -536,10 +887,10 @@
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
         // Blockquotes
-        html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+        html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
 
-        // Links [text](url)
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        // Links [text](url) — only allow http/https URLs
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
         // Unordered lists
         html = html.replace(/^- (.+)$/gm, '<li class="ul-item">$1</li>');
@@ -551,8 +902,7 @@
         html = html.replace(/((?:<li class="ol-item">[\s\S]*?<\/li>\s*)+)/g, '<ol>$1</ol>');
         html = html.replace(/<\/ol>\s*<ol>/g, '');
 
-        // Tables: rows before the |---|---| separator are headers (<th>), rows after are data (<td>).
-        // tableIsHeader flips to false when the separator line is encountered.
+        // Tables
         var tableIsHeader = true;
         html = html.replace(/^\|(.+)\|$/gm, function (match, content) {
             var cells = content.split('|').map(function (c) { return c.trim(); });
@@ -565,14 +915,12 @@
             return '<tr>' + row + '</tr>';
         });
         html = html.replace(/((<tr>[\s\S]*?<\/tr>\s*)+)/g, function (m) {
-            tableIsHeader = true; // Reset for next table
+            tableIsHeader = true;
             return '<table>' + m + '</table>';
         });
         html = html.replace(/<!-- table separator -->\s*/g, '');
 
-        // Paragraphs: wrap text in <p> tags using double-newline as a delimiter,
-        // then strip <p> wrappers that accidentally surround block-level elements
-        // (headers, pre, lists, tables, blockquotes).
+        // Paragraphs
         html = html.replace(/\n\n/g, '</p><p>');
         html = '<p>' + html + '</p>';
         html = html.replace(/<p>\s*<\/p>/g, '');
@@ -596,12 +944,21 @@
     }
 
     function escapeHtml(text) {
-        var div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // --- Event Listeners & UI Wiring ---
+    modeSelect.addEventListener('change', function () {
+        chatInput.placeholder = modeSelect.value === 'ask'
+            ? 'Ask mode \u2014 read-only, no changes to your app...'
+            : 'Agent mode \u2014 can read and modify your app...';
+    });
+
     sendBtn.addEventListener('click', sendMessage);
 
     stopBtn.addEventListener('click', function () {
@@ -644,6 +1001,7 @@
         cumulativeOutputTokens = 0;
         chatHistory = [];
         updateTokenBadge();
+        resetContextUsage();
         sendToBackend('new_chat');
     });
 
@@ -667,6 +1025,11 @@
             applyTheme(this.value);
         });
     }
+
+    // History
+    if (historyBtn) historyBtn.addEventListener('click', openHistory);
+    if (historyCloseBtn) historyCloseBtn.addEventListener('click', closeHistory);
+    if (historyOverlay) historyOverlay.addEventListener('click', closeHistory);
 
     // Export chat
     if (exportBtn) exportBtn.addEventListener('click', openExport);

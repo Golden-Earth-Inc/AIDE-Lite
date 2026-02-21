@@ -26,4 +26,16 @@ public class AideLiteConfig
 
     [JsonPropertyName("theme")]
     public string Theme { get; set; } = "light";
+
+    [JsonPropertyName("retryMaxAttempts")]
+    public int RetryMaxAttempts { get; set; } = 20;
+
+    [JsonPropertyName("retryDelaySeconds")]
+    public int RetryDelaySeconds { get; set; } = 60;
+
+    [JsonPropertyName("maxToolRounds")]
+    public int MaxToolRounds { get; set; } = 10;
+
+    [JsonPropertyName("promptCachingEnabled")]
+    public bool PromptCachingEnabled { get; set; } = true;
 }

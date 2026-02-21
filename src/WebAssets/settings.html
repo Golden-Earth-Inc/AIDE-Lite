@@ -7,6 +7,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; font-src 'self';">
     <title>AIDE Lite Settings</title>
     <link rel="stylesheet" href="styles.css?v=4">
 </head>
@@ -29,12 +30,33 @@
             <label for="contextDepthSelect">Context Depth</label>
             <select id="contextDepthSelect">
                 <option value="full">Full App (all modules)</option>
-                <option value="module">Current Module Only</option>
+                <option value="summary">Summary (lighter, fewer tokens)</option>
+                <option value="none">None (tools only)</option>
             </select>
         </div>
         <div class="form-group">
             <label for="maxTokensInput">Max Response Tokens</label>
             <input type="number" id="maxTokensInput" value="8192" min="256" max="128000">
+        </div>
+        <div class="form-group">
+            <label for="retryMaxAttemptsInput">Rate Limit Max Retries</label>
+            <input type="number" id="retryMaxAttemptsInput" value="20" min="0" max="100">
+            <small>How many times to retry on rate limit (0 = no retries).</small>
+        </div>
+        <div class="form-group">
+            <label for="retryDelaySecondsInput">Retry Delay (seconds)</label>
+            <input type="number" id="retryDelaySecondsInput" value="60" min="1" max="600">
+            <small>Seconds to wait between retries (API retry-after header takes priority).</small>
+        </div>
+        <div class="form-group">
+            <label for="maxToolRoundsInput">Max Tool Rounds</label>
+            <input type="number" id="maxToolRoundsInput" value="10" min="1" max="50">
+            <small>Maximum number of tool-use rounds per message (1–50).</small>
+        </div>
+        <div class="form-group">
+            <label for="promptCachingCheckbox">Prompt Caching</label>
+            <input type="checkbox" id="promptCachingCheckbox" checked>
+            <small>Cache system prompt and tools to reduce rate limit usage (~90% savings on repeated calls).</small>
         </div>
         <div class="form-group">
             <label for="themeSelect">Theme</label>
@@ -66,6 +88,10 @@
                 if (data.selectedModel) document.getElementById('modelSelect').value = data.selectedModel;
                 if (data.contextDepth) document.getElementById('contextDepthSelect').value = data.contextDepth;
                 if (data.maxTokens) document.getElementById('maxTokensInput').value = data.maxTokens;
+                if (data.retryMaxAttempts != null) document.getElementById('retryMaxAttemptsInput').value = data.retryMaxAttempts;
+                if (data.retryDelaySeconds != null) document.getElementById('retryDelaySecondsInput').value = data.retryDelaySeconds;
+                if (data.maxToolRounds != null) document.getElementById('maxToolRoundsInput').value = data.maxToolRounds;
+                if (data.promptCachingEnabled != null) document.getElementById('promptCachingCheckbox').checked = data.promptCachingEnabled;
                 if (data.hasKey) document.getElementById('apiKeyInput').placeholder = '********** (key saved)';
                 if (data.theme) {
                     document.getElementById('themeSelect').value = data.theme;
@@ -84,6 +110,10 @@
                 selectedModel: document.getElementById('modelSelect').value,
                 contextDepth: document.getElementById('contextDepthSelect').value,
                 maxTokens: parseInt(document.getElementById('maxTokensInput').value) || 8192,
+                retryMaxAttempts: (function(v) { var n = parseInt(v); return isNaN(n) ? 20 : n; })(document.getElementById('retryMaxAttemptsInput').value),
+                retryDelaySeconds: parseInt(document.getElementById('retryDelaySecondsInput').value) || 60,
+                maxToolRounds: parseInt(document.getElementById('maxToolRoundsInput').value) || 10,
+                promptCachingEnabled: document.getElementById('promptCachingCheckbox').checked,
                 theme: document.getElementById('themeSelect').value
             });
         });
