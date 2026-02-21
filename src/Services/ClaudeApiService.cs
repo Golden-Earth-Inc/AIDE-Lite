@@ -8,6 +8,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AideLite.Models;
 using Mendix.StudioPro.ExtensionsAPI;
 using Mendix.StudioPro.ExtensionsAPI.Services;
 
@@ -19,11 +20,12 @@ public class ClaudeApiService
     private readonly IHttpClientService _httpClientService;
     private readonly ConfigurationService _configService;
     private readonly ILogService _logService;
-    // Per-request CTS — linked to external token so callers and Cancel() both work
     private CancellationTokenSource? _currentCts;
 
     private const string ApiUrl = "https://api.anthropic.com/v1/messages";
     private const string ApiVersion = "2023-06-01";
+    private const int MaxStreamTextBytes = 2 * 1024 * 1024;
+    private const int MaxToolInputJsonBytes = 512 * 1024;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -41,10 +43,11 @@ public class ClaudeApiService
         _logService = logService;
     }
 
+    // ── Public API ──────────────────────────────────────────────────────
+
     /// <summary>
     /// Send a streaming request to the Claude API with tool definitions.
-    /// Invokes callbacks for text deltas, tool use blocks, and completion.
-    /// Automatically retries on 429 (rate limit) and 529 (overloaded) with exponential backoff.
+    /// Retries automatically on rate-limit (429), overloaded (529), and transient 5xx errors.
     /// </summary>
     public async Task<ApiResponse> SendStreamingRequestAsync(
         string systemPrompt,
@@ -55,14 +58,9 @@ public class ClaudeApiService
         Action<int, int, int>? onRetryWait = null,
         CancellationToken externalToken = default)
     {
-        _logService.Info("AIDE Lite: [API] Getting API key...");
         var apiKey = _configService.GetApiKey();
         if (string.IsNullOrEmpty(apiKey))
-        {
-            _logService.Error("AIDE Lite: [API] No API key found!");
             return ApiResponse.Error("No API key configured. Please set your Claude API key in Settings.");
-        }
-        _logService.Info("AIDE Lite: [API] API key found");
 
         _currentCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
         var ct = _currentCts.Token;
@@ -70,79 +68,10 @@ public class ClaudeApiService
         try
         {
             var config = _configService.GetConfig();
-            _logService.Info($"AIDE Lite: [API] Model: {config.SelectedModel}, MaxTokens: {config.MaxTokens}");
+            var requestJson = BuildRequestJson(systemPrompt, messages, tools, config);
+            _logService.Info($"AIDE Lite: [API] Model: {config.SelectedModel}, MaxTokens: {config.MaxTokens}, body: {requestJson.Length} chars");
 
-            var requestBody = new Dictionary<string, object>
-            {
-                ["model"] = config.SelectedModel,
-                ["max_tokens"] = config.MaxTokens,
-                ["stream"] = true,
-                ["system"] = systemPrompt,
-                ["messages"] = messages
-            };
-
-            if (tools != null && tools.Count > 0)
-            {
-                requestBody["tools"] = tools;
-            }
-
-            var json = JsonSerializer.Serialize(requestBody, JsonOptions);
-            _logService.Info($"AIDE Lite: [API] Request body size: {json.Length} chars");
-
-            var maxRetries = config.RetryMaxAttempts;
-            var retryDelay = config.RetryDelaySeconds;
-            _logService.Info($"AIDE Lite: [API] Retry config: maxAttempts={maxRetries}, delaySec={retryDelay}");
-
-            for (var attempt = 0; attempt <= maxRetries; attempt++)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                using var httpClient = _httpClientService.CreateHttpClient();
-                httpClient.Timeout = TimeSpan.FromMinutes(5);
-
-                var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
-                request.Headers.Add("x-api-key", apiKey);
-                request.Headers.Add("anthropic-version", ApiVersion);
-                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                _logService.Info($"AIDE Lite: [API] Sending HTTP request (attempt {attempt + 1}/{maxRetries + 1})...");
-                var response = await httpClient.SendAsync(request, ct);
-                _logService.Info($"AIDE Lite: [API] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorBody = await response.Content.ReadAsStringAsync(ct);
-                    _logService.Error($"AIDE Lite: [API] Error body: {errorBody}");
-
-                    var statusCode = (int)response.StatusCode;
-
-                    if (statusCode == 401)
-                        return ApiResponse.Error("Invalid API key. Please check your settings.", "auth_error");
-
-                    if (statusCode is 429 or 529 && attempt < maxRetries)
-                    {
-                        var delaySec = GetRetryDelay(response, retryDelay);
-                        _logService.Info($"AIDE Lite: [API] Retryable error {statusCode}, waiting {delaySec}s before retry {attempt + 2}...");
-                        onRetryWait?.Invoke(attempt + 1, delaySec, maxRetries);
-                        await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
-                        continue;
-                    }
-
-                    if (statusCode == 429)
-                        return ApiResponse.Error($"Rate limit exceeded after {maxRetries} retries. Try switching to claude-haiku-4-5-20251001 in Settings for higher rate limits, or increase retry settings.", "rate_limit");
-                    if (statusCode == 529)
-                        return ApiResponse.Error($"Claude API is overloaded after {maxRetries} retries. Please try again in a few minutes.", "overloaded");
-
-                    return ApiResponse.Error($"API error ({statusCode}). Check the AIDE Lite log for details.");
-                }
-
-                _logService.Info("AIDE Lite: [API] Parsing streaming response...");
-                var result = await ParseStreamingResponse(response, onTextDelta, onToolStart, ct);
-                _logService.Info($"AIDE Lite: [API] Stream complete: text={result.FullText?.Length ?? 0} chars, tools={result.ToolCalls.Count}, stop={result.StopReason}, error={result.ErrorMessage ?? "none"}");
-                return result;
-            }
-
-            return ApiResponse.Error("Rate limit exceeded after maximum retries.", "rate_limit");
+            return await SendWithRetries(apiKey, requestJson, config, onTextDelta, onToolStart, onRetryWait, ct);
         }
         catch (OperationCanceledException)
         {
@@ -165,10 +94,97 @@ public class ClaudeApiService
         }
     }
 
-    /// <summary>
-    /// Determines how long to wait before retrying, using the Retry-After header if available,
-    /// otherwise falling back to the user-configured delay.
-    /// </summary>
+    public void Cancel() => _currentCts?.Cancel();
+
+    // ── Request building ────────────────────────────────────────────────
+
+    private static string BuildRequestJson(
+        string systemPrompt, List<object> messages,
+        List<Dictionary<string, object>>? tools, AideLiteConfig config)
+    {
+        var body = new Dictionary<string, object>
+        {
+            ["model"] = config.SelectedModel,
+            ["max_tokens"] = config.MaxTokens,
+            ["stream"] = true,
+            ["system"] = systemPrompt,
+            ["messages"] = messages
+        };
+
+        if (tools is { Count: > 0 })
+            body["tools"] = tools;
+
+        return JsonSerializer.Serialize(body, JsonOptions);
+    }
+
+    // ── Retry loop ──────────────────────────────────────────────────────
+
+    private static bool IsRetryableStatus(int code) =>
+        code is 429 or 529 or 500 or 502 or 503;
+
+    private async Task<ApiResponse> SendWithRetries(
+        string apiKey, string requestJson, AideLiteConfig config,
+        Action<string> onTextDelta, Action<string, string> onToolStart,
+        Action<int, int, int>? onRetryWait, CancellationToken ct)
+    {
+        var maxRetries = config.RetryMaxAttempts;
+        var retryDelay = config.RetryDelaySeconds;
+        _logService.Info($"AIDE Lite: [API] Retry config: max={maxRetries}, delay={retryDelay}s");
+
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            _logService.Info($"AIDE Lite: [API] Attempt {attempt + 1}/{maxRetries + 1}...");
+
+            using var httpClient = _httpClientService.CreateHttpClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(5);
+
+            using var request = CreateHttpRequest(apiKey, requestJson);
+            using var response = await httpClient.SendAsync(request, ct);
+            var statusCode = (int)response.StatusCode;
+            _logService.Info($"AIDE Lite: [API] HTTP {statusCode} {response.StatusCode}");
+
+            if (response.IsSuccessStatusCode)
+                return await ParseStream(response, onTextDelta, onToolStart, ct);
+
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logService.Error($"AIDE Lite: [API] Error body: {errorBody}");
+
+            if (statusCode == 401)
+                return ApiResponse.Error("Invalid API key. Please check your settings.", "auth_error");
+
+            if (!IsRetryableStatus(statusCode) || attempt >= maxRetries)
+                return FinalErrorForStatus(statusCode, maxRetries);
+
+            var delaySec = GetRetryDelay(response, retryDelay);
+            _logService.Info($"AIDE Lite: [API] Retryable {statusCode}, waiting {delaySec}s...");
+            onRetryWait?.Invoke(attempt + 1, delaySec, maxRetries);
+            await Task.Delay(TimeSpan.FromSeconds(delaySec), ct);
+        }
+
+        return ApiResponse.Error("Rate limit exceeded after maximum retries.", "rate_limit");
+    }
+
+    private static HttpRequestMessage CreateHttpRequest(string apiKey, string json)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
+        request.Headers.Add("x-api-key", apiKey);
+        request.Headers.Add("anthropic-version", ApiVersion);
+        request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return request;
+    }
+
+    private static ApiResponse FinalErrorForStatus(int statusCode, int maxRetries)
+    {
+        if (statusCode is 429 or 529)
+            return ApiResponse.Error(
+                $"Rate limit exceeded after {maxRetries} retries. Try switching to claude-haiku-4-5-20251001 in Settings for higher rate limits, or increase retry settings.",
+                "rate_limit");
+
+        return ApiResponse.Error($"API error ({statusCode}). Check the AIDE Lite log for details.");
+    }
+
     private static int GetRetryDelay(HttpResponseMessage response, int configuredDelay)
     {
         if (response.Headers.TryGetValues("retry-after", out var values))
@@ -180,26 +196,24 @@ public class ClaudeApiService
         return configuredDelay;
     }
 
-    public void Cancel()
-    {
-        _currentCts?.Cancel();
-    }
+    // ── SSE stream parsing ──────────────────────────────────────────────
+    //
+    // Claude streams Server-Sent Events (SSE) with these event types:
+    //   message_start / message_delta / message_stop   — message lifecycle
+    //   content_block_start / _delta / _stop           — text & tool_use blocks
+    //   ping                                           — keep-alive (ignored)
+    //   error                                          — stream-level error
+    //
+    // Tool input JSON arrives as incremental fragments across multiple
+    // input_json_delta events and is reassembled in StreamState.
 
-    private const int MaxStreamTextBytes = 2 * 1024 * 1024; // 2 MB cap on accumulated response text
-    private const int MaxToolInputJsonBytes = 512 * 1024;  // 512 KB cap on a single tool_use input
-
-    private async Task<ApiResponse> ParseStreamingResponse(
+    private async Task<ApiResponse> ParseStream(
         HttpResponseMessage response,
         Action<string> onTextDelta,
         Action<string, string> onToolStart,
         CancellationToken ct)
     {
-        var result = new ApiResponse();
-        var currentToolUseId = "";
-        var currentToolName = "";
-        var toolInputJson = new StringBuilder();
-        var fullText = new StringBuilder();
-        var currentContentBlockType = "";
+        var state = new StreamState();
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
@@ -207,129 +221,164 @@ public class ClaudeApiService
         while (!reader.EndOfStream && !ct.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(ct);
-            if (string.IsNullOrEmpty(line)) continue;
-            if (!line.StartsWith("data: ")) continue;
+            if (string.IsNullOrEmpty(line) || !line.StartsWith("data: "))
+                continue;
 
-            var data = line[6..]; // Strip "data: " prefix — Claude SSE lines are always "data: {json}"
-
-            try
-            {
-                var evt = JsonNode.Parse(data);
-                if (evt == null) continue;
-
-                var eventType = evt["type"]?.GetValue<string>();
-
-                switch (eventType)
-                {
-                    case "content_block_start":
-                        var contentBlock = evt["content_block"];
-                        var blockType = contentBlock?["type"]?.GetValue<string>();
-                        currentContentBlockType = blockType ?? "";
-
-                        if (blockType == "tool_use")
-                        {
-                            currentToolUseId = contentBlock?["id"]?.GetValue<string>() ?? "";
-                            currentToolName = contentBlock?["name"]?.GetValue<string>() ?? "";
-                            toolInputJson.Clear();
-                            onToolStart(currentToolName, currentToolUseId);
-                        }
-                        break;
-
-                    case "content_block_delta":
-                        var delta = evt["delta"];
-                        var deltaType = delta?["type"]?.GetValue<string>();
-
-                        if (deltaType == "text_delta")
-                        {
-                            var text = delta?["text"]?.GetValue<string>() ?? "";
-                            if (fullText.Length + text.Length > MaxStreamTextBytes)
-                            {
-                                result.ErrorMessage = "Response exceeded maximum size limit.";
-                                result.ErrorCode = "stream_too_large";
-                                result.FullText = fullText.ToString();
-                                result.IsSuccess = false;
-                                return result;
-                            }
-                            fullText.Append(text);
-                            onTextDelta(text);
-                        }
-                        else if (deltaType == "input_json_delta")
-                        {
-                            var partialJson = delta?["partial_json"]?.GetValue<string>() ?? "";
-                            if (toolInputJson.Length + partialJson.Length > MaxToolInputJsonBytes)
-                            {
-                                result.ErrorMessage = "Tool input exceeded maximum size limit.";
-                                result.ErrorCode = "stream_too_large";
-                                result.FullText = fullText.ToString();
-                                result.IsSuccess = false;
-                                return result;
-                            }
-                            toolInputJson.Append(partialJson);
-                        }
-                        break;
-
-                    case "content_block_stop":
-                        // Finalize tool_use block — reassemble the streamed JSON fragments
-                        if (currentContentBlockType == "tool_use" && !string.IsNullOrEmpty(currentToolUseId))
-                        {
-                            result.ToolCalls.Add(new ToolCall
-                            {
-                                Id = currentToolUseId,
-                                Name = currentToolName,
-                                InputJson = toolInputJson.ToString()
-                            });
-                            currentToolUseId = "";
-                            currentToolName = "";
-                            toolInputJson.Clear();
-                        }
-                        currentContentBlockType = "";
-                        break;
-
-                    case "message_delta":
-                        var stopReason = evt["delta"]?["stop_reason"]?.GetValue<string>();
-                        if (!string.IsNullOrEmpty(stopReason))
-                        {
-                            result.StopReason = stopReason;
-                        }
-                        // message_delta contains output token count
-                        var deltaOutputTokens = evt["usage"]?["output_tokens"]?.GetValue<int>();
-                        if (deltaOutputTokens.HasValue)
-                            result.OutputTokens = deltaOutputTokens.Value;
-                        break;
-
-                    case "message_stop":
-                        break;
-
-                    case "message_start":
-                        // Capture input token count for usage tracking
-                        var usage = evt["message"]?["usage"];
-                        var inputTokens = usage?["input_tokens"]?.GetValue<int>();
-                        if (inputTokens.HasValue)
-                            result.InputTokens = inputTokens.Value;
-                        break;
-
-                    case "ping":
-                        // Keep-alive event — safe to ignore
-                        break;
-
-                    case "error":
-                        var errorMsg = evt["error"]?["message"]?.GetValue<string>() ?? "Unknown streaming error";
-                        result.ErrorMessage = errorMsg;
-                        result.ErrorCode = "stream_error";
-                        break;
-                }
-            }
-            catch (JsonException)
-            {
-                // Skip malformed SSE data lines
-            }
+            var earlyExit = ProcessSseEvent(line[6..], state, onTextDelta, onToolStart);
+            if (earlyExit != null)
+                return earlyExit;
         }
 
-        result.FullText = fullText.ToString();
-        result.IsSuccess = string.IsNullOrEmpty(result.ErrorMessage);
-        return result;
+        state.Result.FullText = state.FullText.ToString();
+        state.Result.IsSuccess = string.IsNullOrEmpty(state.Result.ErrorMessage);
+        return state.Result;
+    }
+
+    private static ApiResponse? ProcessSseEvent(
+        string data, StreamState s,
+        Action<string> onTextDelta, Action<string, string> onToolStart)
+    {
+        try
+        {
+            var evt = JsonNode.Parse(data);
+            if (evt == null) return null;
+
+            return evt["type"]?.GetValue<string>() switch
+            {
+                "content_block_start" => OnBlockStart(evt, s, onToolStart),
+                "content_block_delta" => OnBlockDelta(evt, s, onTextDelta),
+                "content_block_stop"  => OnBlockStop(s),
+                "message_start"       => OnMessageStart(evt, s),
+                "message_delta"       => OnMessageDelta(evt, s),
+                "error"               => OnError(evt, s),
+                _ => null
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // ── Individual SSE event handlers ───────────────────────────────────
+
+    private static ApiResponse? OnBlockStart(JsonNode evt, StreamState s, Action<string, string> onToolStart)
+    {
+        var block = evt["content_block"];
+        s.CurrentBlockType = block?["type"]?.GetValue<string>() ?? "";
+
+        if (s.CurrentBlockType != "tool_use")
+            return null;
+
+        s.CurrentToolId = block?["id"]?.GetValue<string>() ?? "";
+        s.CurrentToolName = block?["name"]?.GetValue<string>() ?? "";
+        s.ToolInputJson.Clear();
+        onToolStart(s.CurrentToolName, s.CurrentToolId);
+        return null;
+    }
+
+    private static ApiResponse? OnBlockDelta(JsonNode evt, StreamState s, Action<string> onTextDelta)
+    {
+        var delta = evt["delta"];
+        var deltaType = delta?["type"]?.GetValue<string>();
+
+        if (deltaType == "text_delta")
+            return AccumulateText(delta, s, onTextDelta);
+
+        if (deltaType == "input_json_delta")
+            return AccumulateToolInput(delta, s);
+
+        return null;
+    }
+
+    private static ApiResponse? AccumulateText(JsonNode? delta, StreamState s, Action<string> onTextDelta)
+    {
+        var text = delta?["text"]?.GetValue<string>() ?? "";
+        if (s.FullText.Length + text.Length > MaxStreamTextBytes)
+            return SizeLimitError("Response exceeded maximum size limit.", s);
+
+        s.FullText.Append(text);
+        onTextDelta(text);
+        return null;
+    }
+
+    private static ApiResponse? AccumulateToolInput(JsonNode? delta, StreamState s)
+    {
+        var fragment = delta?["partial_json"]?.GetValue<string>() ?? "";
+        if (s.ToolInputJson.Length + fragment.Length > MaxToolInputJsonBytes)
+            return SizeLimitError("Tool input exceeded maximum size limit.", s);
+
+        s.ToolInputJson.Append(fragment);
+        return null;
+    }
+
+    private static ApiResponse? OnBlockStop(StreamState s)
+    {
+        if (s.CurrentBlockType == "tool_use" && !string.IsNullOrEmpty(s.CurrentToolId))
+        {
+            s.Result.ToolCalls.Add(new ToolCall
+            {
+                Id = s.CurrentToolId,
+                Name = s.CurrentToolName,
+                InputJson = s.ToolInputJson.ToString()
+            });
+            s.CurrentToolId = "";
+            s.CurrentToolName = "";
+            s.ToolInputJson.Clear();
+        }
+        s.CurrentBlockType = "";
+        return null;
+    }
+
+    private static ApiResponse? OnMessageStart(JsonNode evt, StreamState s)
+    {
+        var inputTokens = evt["message"]?["usage"]?["input_tokens"]?.GetValue<int>();
+        if (inputTokens.HasValue)
+            s.Result.InputTokens = inputTokens.Value;
+        return null;
+    }
+
+    private static ApiResponse? OnMessageDelta(JsonNode evt, StreamState s)
+    {
+        var stopReason = evt["delta"]?["stop_reason"]?.GetValue<string>();
+        if (!string.IsNullOrEmpty(stopReason))
+            s.Result.StopReason = stopReason;
+
+        var outputTokens = evt["usage"]?["output_tokens"]?.GetValue<int>();
+        if (outputTokens.HasValue)
+            s.Result.OutputTokens = outputTokens.Value;
+        return null;
+    }
+
+    private static ApiResponse? OnError(JsonNode evt, StreamState s)
+    {
+        s.Result.ErrorMessage = evt["error"]?["message"]?.GetValue<string>() ?? "Unknown streaming error";
+        s.Result.ErrorCode = "stream_error";
+        return null;
+    }
+
+    private static ApiResponse SizeLimitError(string message, StreamState s) => new()
+    {
+        IsSuccess = false,
+        ErrorMessage = message,
+        ErrorCode = "stream_too_large",
+        FullText = s.FullText.ToString()
+    };
+
+    // ── Stream parse state ──────────────────────────────────────────────
+
+    private class StreamState
+    {
+        public readonly ApiResponse Result = new();
+        public readonly StringBuilder FullText = new();
+        public readonly StringBuilder ToolInputJson = new();
+        public string CurrentBlockType = "";
+        public string CurrentToolId = "";
+        public string CurrentToolName = "";
     }
 }
+
+// ── Data models ─────────────────────────────────────────────────────────
 
 public class ApiResponse
 {

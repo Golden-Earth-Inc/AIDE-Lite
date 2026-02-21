@@ -139,6 +139,7 @@
 
         // Show stop button and processing bar immediately when user sends message
         isStreaming = true;
+        retryAttemptCount = 0;
         sendBtn.disabled = true;
         sendBtn.classList.add('hidden');
         stopBtn.classList.remove('hidden');
@@ -223,6 +224,7 @@
             clearInterval(retryCountdownInterval);
             retryCountdownInterval = null;
         }
+        retryAttemptCount = 0;
         if (streamElement) {
             streamElement.classList.remove('streaming');
             streamElement.innerHTML = renderMarkdown(streamBuffer);
@@ -372,12 +374,14 @@
 
     // --- Retry Wait (rate limit / overload automatic retry) ---
     var retryCountdownInterval = null;
+    var retryAttemptCount = 0;
 
     function handleRetryWait(data) {
         if (!data) return;
-        var attempt = data.attempt || 1;
+        retryAttemptCount++;
+        var attempt = retryAttemptCount;
         var totalSec = data.delaySec || 15;
-        var maxRetries = data.maxRetries || 3;
+        var maxRetries = data.maxRetries || 20;
         var remaining = totalSec;
 
         if (retryCountdownInterval) clearInterval(retryCountdownInterval);
