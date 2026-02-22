@@ -145,6 +145,28 @@
         if (!data) return;
         AIDE.dom.contextDot.className = 'status-dot online';
         AIDE.dom.contextText.textContent = data.summary || 'Context loaded';
+
+        if (data.documentIndex) {
+            var index = {};
+            var shortIndex = {};
+            for (var i = 0; i < data.documentIndex.length; i++) {
+                var doc = data.documentIndex[i];
+                index[doc.qualifiedName] = doc.type;
+
+                var dotIdx = doc.qualifiedName.indexOf('.');
+                if (dotIdx >= 0) {
+                    var shortName = doc.qualifiedName.substring(dotIdx + 1);
+                    if (shortIndex[shortName] === undefined) {
+                        shortIndex[shortName] = { qualifiedName: doc.qualifiedName, type: doc.type };
+                    } else if (shortIndex[shortName] !== null) {
+                        // Same short name in multiple modules — mark ambiguous
+                        shortIndex[shortName] = null;
+                    }
+                }
+            }
+            state.set('documentIndex', index);
+            state.set('documentShortIndex', shortIndex);
+        }
     };
 
     AIDE.handleModelChanged = function () {

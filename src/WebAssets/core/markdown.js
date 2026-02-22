@@ -22,7 +22,13 @@
 
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (m, lang, code) {
             var idx = codeBlocks.length;
-            codeBlocks.push('<pre><code class="language-' + (lang || '') + '">' + AIDE.escapeHtml(code) + '</code></pre>');
+            var escaped = AIDE.escapeHtml(code);
+            codeBlocks.push(
+                '<div class="code-block-wrapper">' +
+                '<button class="code-copy-btn" title="Copy code">&#x2398;</button>' +
+                '<pre><code class="language-' + (lang || '') + '">' + escaped + '</code></pre>' +
+                '</div>'
+            );
             return '\x00CODEBLOCK' + idx + '\x00';
         });
 
@@ -91,6 +97,8 @@
         html = html.replace(/(<\/h[1-3]>)\s*<\/p>/g, '$1');
         html = html.replace(/<p>\s*(<pre>)/g, '$1');
         html = html.replace(/(<\/pre>)\s*<\/p>/g, '$1');
+        html = html.replace(/<p>\s*(<div class="code-block-wrapper">)/g, '$1');
+        html = html.replace(/(<\/div>)\s*<\/p>/g, '$1');
         html = html.replace(/<p>\s*(<ul>)/g, '$1');
         html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
         html = html.replace(/<p>\s*(<ol>)/g, '$1');
@@ -103,7 +111,65 @@
         // Line breaks
         html = html.replace(/\n/g, '<br>');
 
+        html = AIDE.linkifyDocumentReferences(html);
+
         return html;
+    };
+
+    AIDE.linkifyDocumentReferences = function (html) {
+        var index = AIDE.state.get('documentIndex');
+        var shortIndex = AIDE.state.get('documentShortIndex');
+        if ((!index || Object.keys(index).length === 0) &&
+            (!shortIndex || Object.keys(shortIndex).length === 0)) return html;
+
+        // Split by HTML tags to only process text nodes
+        var parts = html.split(/(<[^>]+>)/);
+        var insidePre = 0;
+        var insideAnchor = 0;
+        // Match qualified names (Module.Name) OR standalone identifiers (4+ chars, uppercase start)
+        var namePattern = /[A-Z][a-zA-Z0-9_]*\.[A-Z][a-zA-Z0-9_]*|[A-Z][a-zA-Z0-9_]{3,}/g;
+
+        for (var i = 0; i < parts.length; i++) {
+            var part = parts[i];
+
+            // Track tag nesting — skip fenced code blocks (<pre>) and anchors, but allow inline <code>
+            if (part.charAt(0) === '<') {
+                var lower = part.toLowerCase();
+                if (lower.indexOf('<pre') === 0) insidePre++;
+                else if (lower.indexOf('</pre') === 0) insidePre--;
+                else if (lower.indexOf('<a ') === 0 || lower.indexOf('<a>') === 0) insideAnchor++;
+                else if (lower.indexOf('</a') === 0) insideAnchor--;
+                continue;
+            }
+
+            // Skip text inside fenced code blocks or anchor tags (but NOT inline <code>)
+            if (insidePre > 0 || insideAnchor > 0) continue;
+
+            parts[i] = part.replace(namePattern, function (match) {
+                // Try full qualified name first
+                var docType = index ? index[match] : null;
+                var qualifiedName = match;
+
+                // If not found, try short name lookup
+                if (!docType && shortIndex) {
+                    var entry = shortIndex[match];
+                    if (entry) {
+                        docType = entry.type;
+                        qualifiedName = entry.qualifiedName;
+                    }
+                }
+
+                if (!docType) return match;
+                var safeType = AIDE.safeElementType(docType);
+                return '<span class="doc-ref doc-ref-' + safeType +
+                    '" data-qualified-name="' + AIDE.escapeHtml(qualifiedName) +
+                    '" data-doc-type="' + safeType +
+                    '" title="Open ' + AIDE.escapeHtml(qualifiedName) + ' (' + safeType + ')">' +
+                    match + '</span>';
+            });
+        }
+
+        return parts.join('');
     };
 
     AIDE.inlineStylesForCopy = function (clone) {
@@ -144,6 +210,24 @@
         });
         clone.querySelectorAll('a').forEach(function (el) {
             el.style.cssText = 'color:#7c3aed;text-decoration:underline;';
+        });
+        clone.querySelectorAll('.doc-ref').forEach(function (el) {
+            el.style.cssText = 'font-family:"Cascadia Code","Consolas",monospace;font-size:12px;';
+        });
+    };
+
+    AIDE.copyCodeBlock = function (btn) {
+        var wrapper = btn.closest('.code-block-wrapper');
+        if (!wrapper) return;
+        var code = wrapper.querySelector('code');
+        if (!code) return;
+        var text = code.textContent;
+        navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = '\u2713';
+            setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
+        }).catch(function () {
+            btn.textContent = '!';
+            setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
         });
     };
 

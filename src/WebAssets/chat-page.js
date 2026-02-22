@@ -252,6 +252,26 @@
         });
     });
 
+    // --- Chat area delegated click handlers ---
+    d.chatArea.addEventListener('click', function (e) {
+        var target = e.target;
+
+        // Document reference clicks
+        if (target.classList.contains('doc-ref')) {
+            var qualifiedName = target.getAttribute('data-qualified-name');
+            var docType = target.getAttribute('data-doc-type');
+            if (qualifiedName) {
+                AIDE.sendToBackend('open_document', { qualifiedName: qualifiedName, docType: docType || '' });
+            }
+            return;
+        }
+
+        // Code block copy button clicks (delegated instead of inline onclick for CSP compliance)
+        if (target.classList.contains('code-copy-btn')) {
+            AIDE.copyCodeBlock(target);
+        }
+    });
+
     // --- Setup attachment handlers ---
     AIDE.setupDragDrop(d.inputArea, d.chatInput);
     AIDE.setupFilePicker(d.attachBtn, d.attachFileInput);

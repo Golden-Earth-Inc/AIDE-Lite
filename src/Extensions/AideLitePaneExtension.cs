@@ -79,7 +79,8 @@ public class AideLitePaneExtension : DockablePaneExtension
             _microflowService,
             _activitiesService,
             _expressionService,
-            _untypedModelAccessService);
+            _untypedModelAccessService,
+            _dockingService);
 
         if (_viewCoordinator == null)
         {

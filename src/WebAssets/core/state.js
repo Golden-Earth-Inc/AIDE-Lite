@@ -38,7 +38,9 @@
         initialSettingsLoaded: false,
         skipAutoLoadConversation: false,
         activeDocument: null,
-        viewMode: AIDE.CONST.VIEW_MODES.PANE
+        viewMode: AIDE.CONST.VIEW_MODES.PANE,
+        documentIndex: {},
+        documentShortIndex: {}
     };
 
     AIDE.state = {

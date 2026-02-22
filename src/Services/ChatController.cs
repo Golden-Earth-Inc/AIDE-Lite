@@ -13,7 +13,9 @@ using AideLite.Models.Messages;
 using AideLite.ModelWriters;
 using AideLite.Tools;
 using Mendix.StudioPro.ExtensionsAPI.Model;
+using Mendix.StudioPro.ExtensionsAPI.Model.Projects;
 using Mendix.StudioPro.ExtensionsAPI.Services;
+using Mendix.StudioPro.ExtensionsAPI.UI.Services;
 using Mendix.StudioPro.ExtensionsAPI.UI.WebView;
 
 namespace AideLite.Services;
@@ -30,6 +32,7 @@ public class ChatController
     private readonly IMicroflowActivitiesService _activitiesService;
     private readonly IMicroflowExpressionService _expressionService;
     private readonly IUntypedModelAccessService _untypedModelAccessService;
+    private readonly IDockingWindowService _dockingService;
 
     private IWebView? _webView;
     private bool _webViewReady;
@@ -84,7 +87,8 @@ public class ChatController
         IMicroflowService microflowService,
         IMicroflowActivitiesService activitiesService,
         IMicroflowExpressionService expressionService,
-        IUntypedModelAccessService untypedModelAccessService)
+        IUntypedModelAccessService untypedModelAccessService,
+        IDockingWindowService dockingService)
     {
         _getModel = getModel;
         _logService = logService;
@@ -95,6 +99,7 @@ public class ChatController
         _activitiesService = activitiesService;
         _expressionService = expressionService;
         _untypedModelAccessService = untypedModelAccessService;
+        _dockingService = dockingService;
     }
 
     /// <summary>
@@ -312,6 +317,7 @@ public class ChatController
             _toolRegistry.Register(new GetEnumerationsTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new GetPagesTool(_contextExtractor, pageReader));
             _toolRegistry.Register(new SearchModelTool(model, _contextExtractor));
+            _toolRegistry.Register(new ValidateOqlQueryTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new CreateMicroflowTool(_contextExtractor, microflowGenerator));
             _toolRegistry.Register(new RenameMicroflowTool(_contextExtractor, microflowGenerator));
             _toolRegistry.Register(new AddActivitiesToMicroflowTool(_contextExtractor, microflowGenerator));
@@ -376,6 +382,9 @@ public class ChatController
                 case "consent_accepted":
                     HandleConsentAccepted();
                     break;
+                case "open_document":
+                    HandleOpenDocument(data);
+                    break;
                 case "toggle_view":
                     DiagLog("OnMessageReceived: toggle_view requested");
                     OnToggleRequested?.Invoke();
@@ -416,6 +425,19 @@ public class ChatController
                 activeDocumentType = snapshot.ActiveDocumentType,
                 activeDocumentQualifiedName = snapshot.ActiveDocumentQualifiedName
             });
+
+            // Re-send document index so linkifyDocumentReferences works in the new view
+            if (_cachedContext != null)
+            {
+                var documentIndex = BuildDocumentIndex();
+                SendToWebView("context_loaded", new
+                {
+                    summary = $"{_cachedContext.Modules.Count} modules, " +
+                        $"{_cachedContext.Modules.Sum(m => m.Entities.Count)} entities, " +
+                        $"{_cachedContext.Modules.Sum(m => m.Microflows.Count)} microflows",
+                    documentIndex
+                });
+            }
 
             // Also trigger loading the current conversation so display history is restored
             if (snapshot.ConversationId != null)
@@ -633,6 +655,86 @@ public class ChatController
         }
     }
 
+    private static readonly HashSet<string> ValidDocTypes = new(StringComparer.Ordinal)
+    {
+        "entity", "microflow", "page", "enumeration", "document", "constant", "java_action"
+    };
+
+    private void HandleOpenDocument(JsonObject? data)
+    {
+        var qualifiedName = data?["qualifiedName"]?.GetValue<string>();
+        if (string.IsNullOrEmpty(qualifiedName))
+        {
+            DiagLog("HandleOpenDocument: no qualifiedName provided");
+            return;
+        }
+
+        // Sanitize for log injection prevention — qualifiedName comes from JS (user-controllable)
+        var safeQName = SanitizePromptValue(qualifiedName);
+
+        if (Model == null)
+        {
+            DiagLog("HandleOpenDocument: no model available");
+            return;
+        }
+
+        var dotIndex = qualifiedName.IndexOf('.');
+        if (dotIndex < 0)
+        {
+            DiagLog($"HandleOpenDocument: invalid qualifiedName format '{safeQName}'");
+            return;
+        }
+
+        var moduleName = qualifiedName[..dotIndex];
+        var docName = qualifiedName[(dotIndex + 1)..];
+        var rawDocType = data?["docType"]?.GetValue<string>() ?? "";
+        var docType = ValidDocTypes.Contains(rawDocType) ? rawDocType : "";
+
+        try
+        {
+            foreach (var module in Model.Root.GetModules())
+            {
+                if (module.Name != moduleName) continue;
+
+                // Entities aren't IDocument — open the module's domain model instead
+                if (docType == "entity")
+                {
+                    var domainModel = module.DomainModel;
+                    var opened = _dockingService.TryOpenEditor(domainModel);
+                    DiagLog($"HandleOpenDocument: TryOpenEditor(DomainModel for entity '{safeQName}') = {opened}");
+                    return;
+                }
+
+                foreach (var doc in MicroflowReader.GetAllDocumentsRecursive<IDocument>(module))
+                {
+                    if (doc.Name == docName)
+                    {
+                        var opened = _dockingService.TryOpenEditor(doc);
+                        DiagLog($"HandleOpenDocument: TryOpenEditor('{safeQName}') = {opened}");
+                        return;
+                    }
+                }
+
+                // Fallback: try domain model if document not found (could be an entity without docType)
+                {
+                    var domainModel = module.DomainModel;
+                    if (domainModel.GetEntities().Any(e => e.Name == docName))
+                    {
+                        var opened = _dockingService.TryOpenEditor(domainModel);
+                        DiagLog($"HandleOpenDocument: entity fallback TryOpenEditor(DomainModel for '{safeQName}') = {opened}");
+                        return;
+                    }
+                }
+                break;
+            }
+            DiagLog($"HandleOpenDocument: document '{safeQName}' not found in model");
+        }
+        catch (Exception ex)
+        {
+            DiagLog($"HandleOpenDocument: error opening '{safeQName}': {ex.Message}");
+        }
+    }
+
     private void HandleConsentAccepted()
     {
         _configService.SaveConsent(true);
@@ -654,11 +756,15 @@ public class ChatController
         {
             var config = _configService.GetConfig();
             _cachedContext = _contextExtractor!.ExtractDetailedAppContext(config.ContextDepth);
+
+            var documentIndex = BuildDocumentIndex();
+
             SendToWebView("context_loaded", new
             {
                 summary = $"{_cachedContext.Modules.Count} modules, " +
                     $"{_cachedContext.Modules.Sum(m => m.Entities.Count)} entities, " +
-                    $"{_cachedContext.Modules.Sum(m => m.Microflows.Count)} microflows"
+                    $"{_cachedContext.Modules.Sum(m => m.Microflows.Count)} microflows",
+                documentIndex
             });
         }
         catch (Exception ex)
@@ -1082,6 +1188,25 @@ public class ChatController
             DiagLog($"LoadUserRules: Failed to load rules: {ex.Message}");
             _userRules = null;
         }
+    }
+
+    private List<object> BuildDocumentIndex()
+    {
+        var documentIndex = new List<object>();
+        if (_cachedContext == null) return documentIndex;
+
+        foreach (var module in _cachedContext.Modules)
+        {
+            foreach (var e in module.Entities)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{e.Name}", type = "entity" });
+            foreach (var mf in module.Microflows)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{mf.Name}", type = "microflow" });
+            foreach (var p in module.Pages)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{p.Name}", type = "page" });
+            foreach (var en in module.Enumerations)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{en.Name}", type = "enumeration" });
+        }
+        return documentIndex;
     }
 
     private static int GetContextLimit(string model) => 200_000;
