@@ -71,7 +71,8 @@
         privacyBtn: document.getElementById('privacyBtn'),
         privacyModal: document.getElementById('privacyModal'),
         privacyCloseBtn: document.getElementById('privacyCloseBtn'),
-        privacyOverlay: document.getElementById('privacyOverlay')
+        privacyOverlay: document.getElementById('privacyOverlay'),
+        toggleViewBtn: document.getElementById('toggleViewBtn')
     };
 
     var d = AIDE.dom;
@@ -209,6 +210,24 @@
     if (d.privacyBtn) d.privacyBtn.addEventListener('click', AIDE.openPrivacy);
     if (d.privacyCloseBtn) d.privacyCloseBtn.addEventListener('click', AIDE.closePrivacy);
     if (d.privacyOverlay) d.privacyOverlay.addEventListener('click', AIDE.closePrivacy);
+
+    // Toggle view button
+    if (d.toggleViewBtn) {
+        d.toggleViewBtn.addEventListener('click', function () {
+            if (state.get('isStreaming')) return; // disabled during streaming
+            AIDE.sendToBackend('toggle_view');
+        });
+    }
+
+    // Detect initial mode from URL query param (?mode=pane|tab)
+    (function () {
+        var params = new URLSearchParams(window.location.search);
+        var mode = params.get('mode');
+        if (mode === 'tab' || mode === 'pane') {
+            state.set('viewMode', mode);
+        }
+        AIDE.updateToggleButton();
+    })();
 
     // Close settings modal on overlay click
     document.querySelector('#settingsModal .modal-overlay')?.addEventListener('click', AIDE.closeSettings);

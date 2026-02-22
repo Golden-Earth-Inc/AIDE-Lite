@@ -44,7 +44,9 @@ public class AideLiteDocumentContextMenuExtension : ContextMenuExtension<IDocume
                 _log.Info($"AIDE Lite: 'Explain' clicked for {elementType} '{qualifiedName}'");
                 DocumentReferenceStore.Enqueue(
                     new DocumentReference(DocumentAction.Explain, elementType, qualifiedName));
-                _dockingService.OpenPane(AideLitePaneExtension.PaneId);
+                // Only open the pane if we're in pane mode; in tab mode the chat is already visible
+                if (ViewToggleCoordinator.CurrentViewMode == ViewMode.Pane)
+                    _dockingService.OpenPane(AideLitePaneExtension.PaneId);
             });
 
         yield return new MenuViewModel(
@@ -54,7 +56,8 @@ public class AideLiteDocumentContextMenuExtension : ContextMenuExtension<IDocume
                 _log.Info($"AIDE Lite: 'Add to Context' clicked for {elementType} '{qualifiedName}'");
                 DocumentReferenceStore.Enqueue(
                     new DocumentReference(DocumentAction.AddContext, elementType, qualifiedName));
-                _dockingService.OpenPane(AideLitePaneExtension.PaneId);
+                if (ViewToggleCoordinator.CurrentViewMode == ViewMode.Pane)
+                    _dockingService.OpenPane(AideLitePaneExtension.PaneId);
             });
     }
 

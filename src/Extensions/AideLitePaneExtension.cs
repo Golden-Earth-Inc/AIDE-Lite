@@ -26,6 +26,7 @@ public class AideLitePaneExtension : DockablePaneExtension
     public const string PaneId = "aide-lite-chat";
 
     private readonly IMessageBoxService _messageBoxService;
+    private readonly IDockingWindowService _dockingService;
     private readonly ILogService _logService;
     private readonly IHttpClientService _httpClientService;
     private readonly IDomainModelService _domainModelService;
@@ -33,7 +34,10 @@ public class AideLitePaneExtension : DockablePaneExtension
     private readonly IMicroflowActivitiesService _activitiesService;
     private readonly IMicroflowExpressionService _expressionService;
     private readonly IUntypedModelAccessService _untypedModelAccessService;
+
     private ConfigurationService? _configService;
+    private ChatController? _chatController;
+    private ViewToggleCoordinator? _viewCoordinator;
     private AideLitePaneWebViewModel? _currentViewModel;
     private IEventSubscription? _activeDocSubscription;
 
@@ -41,6 +45,7 @@ public class AideLitePaneExtension : DockablePaneExtension
     [ImportingConstructor]
     public AideLitePaneExtension(
         IMessageBoxService messageBoxService,
+        IDockingWindowService dockingService,
         ILogService logService,
         IHttpClientService httpClientService,
         IDomainModelService domainModelService,
@@ -50,6 +55,7 @@ public class AideLitePaneExtension : DockablePaneExtension
         IUntypedModelAccessService untypedModelAccessService)
     {
         _messageBoxService = messageBoxService;
+        _dockingService = dockingService;
         _logService = logService;
         _httpClientService = httpClientService;
         _domainModelService = domainModelService;
@@ -61,45 +67,81 @@ public class AideLitePaneExtension : DockablePaneExtension
 
     public override string Id => PaneId;
 
+    /// <summary>
+    /// Ensures ChatController and ViewToggleCoordinator singletons exist.
+    /// Called on first Open() and survives pane close/reopen.
+    /// </summary>
+    private void EnsureSingletons()
+    {
+        _configService ??= new ConfigurationService(_logService, null);
+
+        if (_chatController == null)
+        {
+            _chatController = new ChatController(
+                () => CurrentApp,
+                _logService,
+                _configService,
+                _httpClientService,
+                _domainModelService,
+                _microflowService,
+                _activitiesService,
+                _expressionService,
+                _untypedModelAccessService);
+        }
+
+        if (_viewCoordinator == null)
+        {
+            _viewCoordinator = new ViewToggleCoordinator(
+                _dockingService,
+                _chatController,
+                () => WebServerBaseUrl,
+                _logService,
+                PaneId);
+
+            _chatController.OnToggleRequested += () => _viewCoordinator.ToggleView();
+        }
+    }
+
     public override DockablePaneViewModelBase Open()
     {
         _logService.Info("AIDE Lite: Opening chat pane");
 
-        // Clean up previous ViewModel if pane is being re-opened (Open() fires every time, not just once)
-        _currentViewModel?.Cleanup();
+        EnsureSingletons();
 
-        _configService ??= new ConfigurationService(_logService, null);
+        // If pane is being re-opened (not from a toggle), detach previous WebView
+        if (!_viewCoordinator!.IsToggling)
+        {
+            _currentViewModel?.Cleanup();
+        }
 
         // Lambda `() => CurrentApp` ensures we always read the latest model, even after project switch
-        _currentViewModel = new AideLitePaneWebViewModel(
-            () => CurrentApp,
-            WebServerBaseUrl,
-            _logService,
-            _configService,
-            _httpClientService,
-            _domainModelService,
-            _microflowService,
-            _activitiesService,
-            _expressionService,
-            _untypedModelAccessService
-        );
+        _currentViewModel = new AideLitePaneWebViewModel(_chatController!, WebServerBaseUrl);
 
         // Track active document changes and forward to ViewModel
         if (_activeDocSubscription != null)
             Unsubscribe(_activeDocSubscription);
         _activeDocSubscription = Subscribe<ActiveDocumentChanged>(e => OnActiveDocumentChanged(e));
 
-        // OnClosed callback: cancel in-flight API calls, clear conversation, detach WebView
+        // OnClosed callback: detach WebView but preserve conversation state in ChatController
         _currentViewModel.OnClosed = () =>
         {
-            _logService.Info("AIDE Lite: Pane closed, cleaning up");
+            _logService.Info("AIDE Lite: Pane closed");
             if (_activeDocSubscription != null)
             {
                 Unsubscribe(_activeDocSubscription);
                 _activeDocSubscription = null;
             }
-            _currentViewModel.Cleanup();
+
+            if (_viewCoordinator!.IsToggling)
+            {
+                // During a toggle, ChatController manages its own detach
+                _currentViewModel = null;
+                return;
+            }
+
+            _currentViewModel?.Cleanup();
             _currentViewModel = null;
+            _viewCoordinator.OnPaneClosed();
         };
         return _currentViewModel;
     }

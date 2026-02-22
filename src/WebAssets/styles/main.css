@@ -170,6 +170,8 @@ body {
     flex-shrink: 0;
 }
 .icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.icon-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.icon-btn:disabled:hover { background: none; color: #ccc; }
 
 /* === Context Bar === */
 .context-bar {

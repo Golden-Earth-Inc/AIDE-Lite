@@ -32,6 +32,7 @@
         AIDE.dom.sendBtn.disabled = true;
         AIDE.dom.sendBtn.classList.add('hidden');
         AIDE.dom.stopBtn.classList.remove('hidden');
+        if (AIDE.dom.toggleViewBtn) AIDE.dom.toggleViewBtn.disabled = true;
         AIDE.showProcessingBar('Thinking...');
 
         var payload = { message: text, mode: AIDE.dom.modeSelect.value };
@@ -112,6 +113,7 @@
         AIDE.dom.sendBtn.disabled = false;
         AIDE.dom.sendBtn.classList.remove('hidden');
         AIDE.dom.stopBtn.classList.add('hidden');
+        if (AIDE.dom.toggleViewBtn) AIDE.dom.toggleViewBtn.disabled = false;
         AIDE.hideToolActivity();
         AIDE.hideProcessingBar();
         AIDE.autoSaveChatState();

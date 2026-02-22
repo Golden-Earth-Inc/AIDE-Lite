@@ -38,7 +38,8 @@ public class AideLiteEntityContextMenuExtension : ContextMenuExtension<IEntity>
                 _log.Info($"AIDE Lite: 'Explain' clicked for entity '{qualifiedName}'");
                 DocumentReferenceStore.Enqueue(
                     new DocumentReference(DocumentAction.Explain, "entity", qualifiedName));
-                _dockingService.OpenPane(AideLitePaneExtension.PaneId);
+                if (ViewToggleCoordinator.CurrentViewMode == ViewMode.Pane)
+                    _dockingService.OpenPane(AideLitePaneExtension.PaneId);
             });
 
         yield return new MenuViewModel(
@@ -48,7 +49,8 @@ public class AideLiteEntityContextMenuExtension : ContextMenuExtension<IEntity>
                 _log.Info($"AIDE Lite: 'Add to Context' clicked for entity '{qualifiedName}'");
                 DocumentReferenceStore.Enqueue(
                     new DocumentReference(DocumentAction.AddContext, "entity", qualifiedName));
-                _dockingService.OpenPane(AideLitePaneExtension.PaneId);
+                if (ViewToggleCoordinator.CurrentViewMode == ViewMode.Pane)
+                    _dockingService.OpenPane(AideLitePaneExtension.PaneId);
             });
     }
 

@@ -36,7 +36,8 @@
         autoLoadPending: false,
         initialSettingsLoaded: false,
         skipAutoLoadConversation: false,
-        activeDocument: null
+        activeDocument: null,
+        viewMode: 'pane'
     };
 
     AIDE.state = {
