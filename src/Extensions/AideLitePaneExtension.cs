@@ -7,7 +7,10 @@ using System.ComponentModel.Composition;
 using System.Runtime.Versioning;
 using AideLite.Services;
 using AideLite.ViewModels;
+using Mendix.StudioPro.ExtensionsAPI.Model.Microflows;
+using Mendix.StudioPro.ExtensionsAPI.Model.Pages;
 using Mendix.StudioPro.ExtensionsAPI.UI.DockablePane;
+using Mendix.StudioPro.ExtensionsAPI.UI.Events;
 using Mendix.StudioPro.ExtensionsAPI.UI.Services;
 using Mendix.StudioPro.ExtensionsAPI.Services;
 
@@ -32,6 +35,7 @@ public class AideLitePaneExtension : DockablePaneExtension
     private readonly IUntypedModelAccessService _untypedModelAccessService;
     private ConfigurationService? _configService;
     private AideLitePaneWebViewModel? _currentViewModel;
+    private IEventSubscription? _activeDocSubscription;
 
     // All Mendix services are injected by MEF via [ImportingConstructor]
     [ImportingConstructor]
@@ -80,13 +84,71 @@ public class AideLitePaneExtension : DockablePaneExtension
             _untypedModelAccessService
         );
 
+        // Track active document changes and forward to ViewModel
+        if (_activeDocSubscription != null)
+            Unsubscribe(_activeDocSubscription);
+        _activeDocSubscription = Subscribe<ActiveDocumentChanged>(e => OnActiveDocumentChanged(e));
+
         // OnClosed callback: cancel in-flight API calls, clear conversation, detach WebView
         _currentViewModel.OnClosed = () =>
         {
             _logService.Info("AIDE Lite: Pane closed, cleaning up");
+            if (_activeDocSubscription != null)
+            {
+                Unsubscribe(_activeDocSubscription);
+                _activeDocSubscription = null;
+            }
             _currentViewModel.Cleanup();
             _currentViewModel = null;
         };
         return _currentViewModel;
+    }
+
+    private void OnActiveDocumentChanged(ActiveDocumentChanged e)
+    {
+        var vm = _currentViewModel;
+        if (vm == null) return;
+
+        if (e.DocumentName == null)
+        {
+            vm.UpdateActiveDocument(null, null, null);
+            return;
+        }
+
+        var docType = e.DocumentType?.ToLowerInvariant() switch
+        {
+            "microflow" or "microflows$microflow" => "microflow",
+            "page" or "pages$page" => "page",
+            "constant" or "constants$constant" => "constant",
+            "enumeration" or "enumerations$enumeration" => "enumeration",
+            "javaaction" or "javaactions$javaaction" => "java_action",
+            _ => e.DocumentType ?? "document"
+        };
+
+        var qualifiedName = ResolveQualifiedName(e.DocumentName);
+        vm.UpdateActiveDocument(e.DocumentName, docType, qualifiedName);
+    }
+
+    private string ResolveQualifiedName(string documentName)
+    {
+        if (CurrentApp == null) return documentName;
+
+        try
+        {
+            foreach (var module in CurrentApp.Root.GetModules())
+            {
+                if (module.FromAppStore) continue;
+                foreach (var doc in module.GetDocuments())
+                {
+                    if (doc.Name == documentName)
+                        return $"{module.Name}.{documentName}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logService.Warn($"AIDE Lite: Error resolving active doc qualified name for '{documentName}': {ex.Message}");
+        }
+        return documentName;
     }
 }
