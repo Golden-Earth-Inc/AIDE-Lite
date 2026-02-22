@@ -200,7 +200,20 @@
                 <p class="history-empty">No saved conversations yet.</p>
             </div>
             <div class="modal-actions">
+                <button id="historyClearAllBtn" class="secondary-btn danger-btn">Clear All</button>
                 <button id="historyCloseBtn" class="secondary-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Clear All Dialog -->
+    <div id="confirmClearModal" class="modal hidden">
+        <div class="modal-overlay" id="confirmClearOverlay"></div>
+        <div class="modal-dialog confirm-dialog">
+            <p>Delete all saved conversations?<br>This cannot be undone.</p>
+            <div class="modal-actions">
+                <button id="confirmClearYesBtn" class="primary-btn danger-btn">Delete All</button>
+                <button id="confirmClearNoBtn" class="secondary-btn">Cancel</button>
             </div>
         </div>
     </div>

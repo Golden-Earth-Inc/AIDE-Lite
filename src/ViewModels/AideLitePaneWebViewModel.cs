@@ -292,6 +292,9 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 case "delete_conversation":
                     HandleDeleteConversation(data);
                     break;
+                case "delete_all_conversations":
+                    HandleDeleteAllConversations();
+                    break;
                 case "save_chat_state":
                     HandleSaveChatState(data);
                     break;
@@ -675,6 +678,15 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             _currentConversationTitle = null;
         }
 
+        HandleGetHistory();
+    }
+
+    private void HandleDeleteAllConversations()
+    {
+        EnsureServicesInitialized();
+        _historyService!.DeleteAllConversations();
+        _currentConversationId = null;
+        _currentConversationTitle = null;
         HandleGetHistory();
     }
 

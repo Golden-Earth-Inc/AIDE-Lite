@@ -165,6 +165,25 @@ public partial class ConversationHistoryService
         }
     }
 
+    public void DeleteAllConversations()
+    {
+        try
+        {
+            foreach (var file in Directory.GetFiles(_historyDir, "*.json"))
+            {
+                try { File.Delete(file); }
+                catch (Exception ex)
+                {
+                    _logService.Error($"AIDE Lite: Failed to delete {Path.GetFileName(file)}: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logService.Error($"AIDE Lite: Failed to delete all conversations: {ex.Message}");
+        }
+    }
+
     private void PruneOldConversations()
     {
         try

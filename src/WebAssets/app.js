@@ -1536,6 +1536,24 @@
     if (historyBtn) historyBtn.addEventListener('click', openHistory);
     if (historyCloseBtn) historyCloseBtn.addEventListener('click', closeHistory);
     if (historyOverlay) historyOverlay.addEventListener('click', closeHistory);
+    var historyClearAllBtn = document.getElementById('historyClearAllBtn');
+    var confirmClearModal = document.getElementById('confirmClearModal');
+    var confirmClearYesBtn = document.getElementById('confirmClearYesBtn');
+    var confirmClearNoBtn = document.getElementById('confirmClearNoBtn');
+    var confirmClearOverlay = document.getElementById('confirmClearOverlay');
+    if (historyClearAllBtn) historyClearAllBtn.addEventListener('click', function () {
+        if (confirmClearModal) confirmClearModal.classList.remove('hidden');
+    });
+    if (confirmClearYesBtn) confirmClearYesBtn.addEventListener('click', function () {
+        sendToBackend('delete_all_conversations');
+        if (confirmClearModal) confirmClearModal.classList.add('hidden');
+    });
+    if (confirmClearNoBtn) confirmClearNoBtn.addEventListener('click', function () {
+        if (confirmClearModal) confirmClearModal.classList.add('hidden');
+    });
+    if (confirmClearOverlay) confirmClearOverlay.addEventListener('click', function () {
+        if (confirmClearModal) confirmClearModal.classList.add('hidden');
+    });
 
     if (exportBtn) exportBtn.addEventListener('click', openExport);
     if (exportDownloadBtn) exportDownloadBtn.addEventListener('click', exportChat);
