@@ -426,6 +426,19 @@ public class ChatController
                 activeDocumentQualifiedName = snapshot.ActiveDocumentQualifiedName
             });
 
+            // Re-send document index so linkifyDocumentReferences works in the new view
+            if (_cachedContext != null)
+            {
+                var documentIndex = BuildDocumentIndex();
+                SendToWebView("context_loaded", new
+                {
+                    summary = $"{_cachedContext.Modules.Count} modules, " +
+                        $"{_cachedContext.Modules.Sum(m => m.Entities.Count)} entities, " +
+                        $"{_cachedContext.Modules.Sum(m => m.Microflows.Count)} microflows",
+                    documentIndex
+                });
+            }
+
             // Also trigger loading the current conversation so display history is restored
             if (snapshot.ConversationId != null)
             {
@@ -718,18 +731,7 @@ public class ChatController
             var config = _configService.GetConfig();
             _cachedContext = _contextExtractor!.ExtractDetailedAppContext(config.ContextDepth);
 
-            var documentIndex = new List<object>();
-            foreach (var module in _cachedContext.Modules)
-            {
-                foreach (var e in module.Entities)
-                    documentIndex.Add(new { qualifiedName = $"{module.Name}.{e.Name}", type = "entity" });
-                foreach (var mf in module.Microflows)
-                    documentIndex.Add(new { qualifiedName = $"{module.Name}.{mf.Name}", type = "microflow" });
-                foreach (var p in module.Pages)
-                    documentIndex.Add(new { qualifiedName = $"{module.Name}.{p.Name}", type = "page" });
-                foreach (var en in module.Enumerations)
-                    documentIndex.Add(new { qualifiedName = $"{module.Name}.{en.Name}", type = "enumeration" });
-            }
+            var documentIndex = BuildDocumentIndex();
 
             SendToWebView("context_loaded", new
             {
@@ -1140,6 +1142,25 @@ public class ChatController
             DiagLog($"LoadUserRules: Failed to load rules: {ex.Message}");
             _userRules = null;
         }
+    }
+
+    private List<object> BuildDocumentIndex()
+    {
+        var documentIndex = new List<object>();
+        if (_cachedContext == null) return documentIndex;
+
+        foreach (var module in _cachedContext.Modules)
+        {
+            foreach (var e in module.Entities)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{e.Name}", type = "entity" });
+            foreach (var mf in module.Microflows)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{mf.Name}", type = "microflow" });
+            foreach (var p in module.Pages)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{p.Name}", type = "page" });
+            foreach (var en in module.Enumerations)
+                documentIndex.Add(new { qualifiedName = $"{module.Name}.{en.Name}", type = "enumeration" });
+        }
+        return documentIndex;
     }
 
     private static int GetContextLimit(string model) => 200_000;
