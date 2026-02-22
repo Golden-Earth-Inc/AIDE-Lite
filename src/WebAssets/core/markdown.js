@@ -124,7 +124,7 @@
 
         // Split by HTML tags to only process text nodes
         var parts = html.split(/(<[^>]+>)/);
-        var insideCode = 0;
+        var insidePre = 0;
         var insideAnchor = 0;
         // Match qualified names (Module.Name) OR standalone identifiers (4+ chars, uppercase start)
         var namePattern = /[A-Z][a-zA-Z0-9_]*\.[A-Z][a-zA-Z0-9_]*|[A-Z][a-zA-Z0-9_]{3,}/g;
@@ -132,18 +132,18 @@
         for (var i = 0; i < parts.length; i++) {
             var part = parts[i];
 
-            // Track tag nesting
+            // Track tag nesting — skip fenced code blocks (<pre>) and anchors, but allow inline <code>
             if (part.charAt(0) === '<') {
                 var lower = part.toLowerCase();
-                if (lower.indexOf('<code') === 0 || lower.indexOf('<pre') === 0) insideCode++;
-                else if (lower.indexOf('</code') === 0 || lower.indexOf('</pre') === 0) insideCode--;
+                if (lower.indexOf('<pre') === 0) insidePre++;
+                else if (lower.indexOf('</pre') === 0) insidePre--;
                 else if (lower.indexOf('<a ') === 0 || lower.indexOf('<a>') === 0) insideAnchor++;
                 else if (lower.indexOf('</a') === 0) insideAnchor--;
                 continue;
             }
 
-            // Skip text inside code or anchor tags
-            if (insideCode > 0 || insideAnchor > 0) continue;
+            // Skip text inside fenced code blocks or anchor tags (but NOT inline <code>)
+            if (insidePre > 0 || insideAnchor > 0) continue;
 
             parts[i] = part.replace(namePattern, function (match) {
                 // Try full qualified name first

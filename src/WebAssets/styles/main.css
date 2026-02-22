@@ -1308,6 +1308,12 @@ body.dark .file-chip-sent.file-chip-data {
     background: rgba(217, 119, 6, 0.15);
 }
 
+/* Document references inside inline code — no extra background, inherit code styling */
+code .doc-ref {
+    background: transparent;
+    padding: 0;
+}
+
 /* Dark mode document references */
 body.dark .doc-ref-entity {
     color: #c4b5fd;
