@@ -93,6 +93,11 @@ public class AideLitePaneExtension : DockablePaneExtension
         _currentViewModel.OnClosed = () =>
         {
             _logService.Info("AIDE Lite: Pane closed, cleaning up");
+            if (_activeDocSubscription != null)
+            {
+                Unsubscribe(_activeDocSubscription);
+                _activeDocSubscription = null;
+            }
             _currentViewModel.Cleanup();
             _currentViewModel = null;
         };

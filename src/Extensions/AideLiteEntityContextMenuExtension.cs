@@ -63,7 +63,7 @@ public class AideLiteEntityContextMenuExtension : ContextMenuExtension<IEntity>
                 if (module.FromAppStore) continue;
                 foreach (var e in module.DomainModel.GetEntities())
                 {
-                    if (e.Name == entity.Name)
+                    if (ReferenceEquals(e, entity))
                         return $"{module.Name}.{entity.Name}";
                 }
             }

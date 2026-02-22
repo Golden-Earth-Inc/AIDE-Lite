@@ -313,7 +313,8 @@ public class ConversationManager
         var lastImageMsgIdx = -1;
         for (var i = _messages.Count - 1; i >= 0; i--)
         {
-            if (_messages[i].Role == "user" && _messages[i].Content is List<object>
+            if (_messages[i].Role == "user"
+                && (_messages[i].Content is List<object> || _messages[i].Content is JsonArray)
                 && !_messages[i].HasToolResult)
             {
                 lastImageMsgIdx = i;
@@ -327,6 +328,15 @@ public class ConversationManager
         {
             if (_messages[i].Role != "user") continue;
             if (_messages[i].HasToolResult) continue;
+
+            // Content may be List<object> (newly created) or JsonArray (restored from disk)
+            if (_messages[i].Content is JsonArray imgJsonArray)
+            {
+                var converted = new List<object>();
+                foreach (var item in imgJsonArray)
+                    converted.Add(item?.DeepClone() ?? new JsonObject());
+                _messages[i].Content = converted;
+            }
             if (_messages[i].Content is not List<object> blocks) continue;
 
             var compacted = false;
