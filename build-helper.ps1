@@ -45,6 +45,22 @@ function Step-Close {
         Write-Host "Studio Pro is not running." -ForegroundColor Gray
     }
 
+    # Kill orphaned Java runtime holding port 8090 (Mendix app server)
+    try {
+        $portHolders = netstat -ano 2>$null | Select-String ":8090\s" | ForEach-Object {
+            if ($_ -match '\s(\d+)\s*$') { [int]$Matches[1] }
+        } | Where-Object { $_ -ne 0 } | Sort-Object -Unique
+        foreach ($procId in $portHolders) {
+            $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Host "Killing orphaned process on port 8090: $($proc.ProcessName) (PID: $procId)" -ForegroundColor Yellow
+                Stop-Process -Id $procId -Force
+            }
+        }
+    } catch {
+        # Port check is best-effort — don't fail the build
+    }
+
     if (Test-Path $LockFile) {
         Remove-Item $LockFile -Force
         Write-Host "Removed lock file." -ForegroundColor Gray

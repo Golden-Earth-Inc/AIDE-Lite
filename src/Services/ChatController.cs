@@ -312,6 +312,7 @@ public class ChatController
             _toolRegistry.Register(new GetEnumerationsTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new GetPagesTool(_contextExtractor, pageReader));
             _toolRegistry.Register(new SearchModelTool(model, _contextExtractor));
+            _toolRegistry.Register(new ValidateOqlQueryTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new CreateMicroflowTool(_contextExtractor, microflowGenerator));
             _toolRegistry.Register(new RenameMicroflowTool(_contextExtractor, microflowGenerator));
             _toolRegistry.Register(new AddActivitiesToMicroflowTool(_contextExtractor, microflowGenerator));
