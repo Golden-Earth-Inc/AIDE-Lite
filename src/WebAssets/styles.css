@@ -671,3 +671,66 @@ body.dark .success-msg { color: #86efac; }
     color: #dc2626;
     background: var(--bg-error);
 }
+
+/* === Consent & Privacy Modals === */
+.consent-dialog,
+.privacy-dialog {
+    width: 440px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+.consent-content,
+.privacy-content {
+    flex: 1;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    max-height: 50vh;
+    padding-right: 4px;
+}
+.consent-content ul,
+.privacy-content ul {
+    margin: 6px 0 10px;
+    padding-left: 18px;
+}
+.consent-content li,
+.privacy-content li {
+    margin-bottom: 6px;
+}
+.consent-content p,
+.privacy-content p {
+    margin: 6px 0;
+}
+.privacy-content h4 {
+    font-size: 13px;
+    margin: 14px 0 4px;
+    color: var(--text-primary);
+}
+.privacy-content h4:first-child {
+    margin-top: 0;
+}
+.privacy-content a {
+    color: #7c3aed;
+    text-decoration: underline;
+}
+.privacy-content a:hover {
+    color: #5b21b6;
+}
+.consent-content a {
+    color: #7c3aed;
+    text-decoration: underline;
+}
+.consent-content a:hover {
+    color: #5b21b6;
+}
+
+/* === Data Disclosure === */
+.data-disclosure {
+    font-size: 10px;
+    color: var(--text-hint);
+    text-align: center;
+    padding: 2px 12px 6px;
+    flex-shrink: 0;
+}

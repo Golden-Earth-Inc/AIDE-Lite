@@ -175,7 +175,8 @@ public class ClaudeApiService
             }
 
             var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logService.Error($"AIDE Lite: [API] Error body: {errorBody}");
+            var truncatedBody = errorBody.Length > 500 ? errorBody[..500] + "...(truncated)" : errorBody;
+            _logService.Error($"AIDE Lite: [API] Error body: {truncatedBody}");
 
             if (statusCode == 401)
                 return ApiResponse.Error("Invalid API key. Please check your settings.", "auth_error");

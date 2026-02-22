@@ -114,6 +114,13 @@ public class ConfigurationService
         _logService.Info("AIDE Lite: Configuration saved");
     }
 
+    public void SaveConsent(bool accepted)
+    {
+        _cachedConfig.HasAcceptedDataConsent = accepted;
+        SaveToDisk(_cachedConfig);
+        _logService.Info($"AIDE Lite: Data consent {(accepted ? "accepted" : "revoked")}");
+    }
+
     private AideLiteConfig LoadFromDisk()
     {
         try
@@ -136,7 +143,9 @@ public class ConfigurationService
         try
         {
             var json = JsonSerializer.Serialize(config, JsonOptions);
-            File.WriteAllText(_configFilePath, json);
+            var tempPath = _configFilePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, _configFilePath, overwrite: true);
         }
         catch (Exception ex)
         {

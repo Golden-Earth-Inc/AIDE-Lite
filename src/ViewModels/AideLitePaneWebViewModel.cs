@@ -101,6 +101,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     /// <summary>
     /// Write diagnostic log to file AND send to WebView for visibility.
     /// </summary>
+    private const long MaxLogFileSize = 5 * 1024 * 1024; // 5 MB
+
     private void DiagLog(string message)
     {
         var logLine = $"[{DateTime.Now:HH:mm:ss.fff}] {message}";
@@ -110,7 +112,22 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "AideLite");
             Directory.CreateDirectory(logDir);
-            File.AppendAllText(Path.Combine(logDir, "debug.log"), logLine + Environment.NewLine);
+            var logPath = Path.Combine(logDir, "debug.log");
+
+            // Log rotation: if file exceeds 5 MB, rotate to .log.old (keep 1 backup)
+            if (File.Exists(logPath))
+            {
+                var info = new FileInfo(logPath);
+                if (info.Length > MaxLogFileSize)
+                {
+                    var oldPath = logPath + ".old";
+                    File.Copy(logPath, oldPath, overwrite: true);
+                    File.WriteAllText(logPath, logLine + Environment.NewLine);
+                    return;
+                }
+            }
+
+            File.AppendAllText(logPath, logLine + Environment.NewLine);
         }
         catch { /* ignore file errors */ }
 
@@ -208,6 +225,9 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 case "save_chat_state":
                     HandleSaveChatState(data);
                     break;
+                case "consent_accepted":
+                    HandleConsentAccepted();
+                    break;
                 case "MessageListenerRegistered":
                     DiagLog("OnMessageReceived: JS message listener registered - bridge ready");
                     break;
@@ -249,9 +269,19 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 return;
             }
 
-            DiagLog($"[2/6] Message: \"{messageText.Substring(0, Math.Min(messageText.Length, 50))}\"");
+            DiagLog($"[2/6] Message received (length={messageText.Length})");
 
             EnsureServicesInitialized();
+
+            // GDPR consent gate: require user acceptance before any data leaves the machine
+            var consentConfig = _configService.GetConfig();
+            if (!consentConfig.HasAcceptedDataConsent)
+            {
+                DiagLog("[2/6] Data consent not yet accepted — prompting user");
+                _conversation!.AddUserMessage(messageText);
+                SendToWebView("consent_required", new { pendingMessage = true });
+                return;
+            }
 
             if (_currentConversationId == null)
             {
@@ -389,6 +419,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         {
             _isChatProcessing = false;
         }
+    }
+
+    private void HandleConsentAccepted()
+    {
+        _configService.SaveConsent(true);
+        DiagLog("Data consent accepted by user");
+        SendToWebView("consent_saved", new { accepted = true });
     }
 
     private void HandleGetContext()
@@ -609,6 +646,8 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     /// <summary>
     /// Load user rules from .aide-lite-rules.md in the Mendix project root.
     /// </summary>
+    private const long MaxRulesFileSize = 64 * 1024; // 64 KB
+
     private void LoadUserRules()
     {
         try
@@ -616,11 +655,35 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             // Navigate from extension DLL location up to the Mendix project root (3 levels up)
             var assemblyDir = Path.GetDirectoryName(GetType().Assembly.Location)!;
             var appRoot = Path.GetFullPath(Path.Combine(assemblyDir, "..", "..", ".."));
+
+            // Validate this looks like a Mendix project root (must contain a .mpr file)
+            if (!Directory.GetFiles(appRoot, "*.mpr").Any())
+            {
+                DiagLog("LoadUserRules: No .mpr file found in resolved project root — skipping rules");
+                _userRules = null;
+                return;
+            }
+
             var rulesPath = Path.Combine(appRoot, ".aide-lite-rules.md");
-            _userRules = File.Exists(rulesPath) ? File.ReadAllText(rulesPath) : null;
+            if (!File.Exists(rulesPath))
+            {
+                _userRules = null;
+                return;
+            }
+
+            var fileInfo = new FileInfo(rulesPath);
+            if (fileInfo.Length > MaxRulesFileSize)
+            {
+                DiagLog($"LoadUserRules: Rules file exceeds {MaxRulesFileSize / 1024}KB limit ({fileInfo.Length} bytes) — skipping");
+                _userRules = null;
+                return;
+            }
+
+            _userRules = File.ReadAllText(rulesPath);
         }
-        catch
+        catch (Exception ex)
         {
+            DiagLog($"LoadUserRules: Failed to load rules: {ex.Message}");
             _userRules = null;
         }
     }

@@ -28,6 +28,7 @@
                 <button id="themeToggleBtn" class="icon-btn" title="Toggle Dark Mode">&#x1F319;</button>
                 <button id="refreshBtn" class="icon-btn" title="Refresh App Context">&#x21bb;</button>
                 <button id="newChatBtn" class="icon-btn" title="New Chat">&#x2795;</button>
+                <button id="privacyBtn" class="icon-btn" title="Privacy Notice">&#x1F512;</button>
                 <button id="settingsBtn" class="icon-btn" title="Settings">&#x2699;</button>
             </div>
         </div>
@@ -89,6 +90,7 @@
             <button id="sendBtn" class="send-btn" title="Send">&#x27A4;</button>
             <button id="stopBtn" class="stop-btn hidden" title="Stop generating">&#x25A0;</button>
         </div>
+        <div class="data-disclosure">Messages and app context are sent to Anthropic's Claude API for processing.</div>
     </div>
 
     <!-- Settings Modal -->
@@ -190,6 +192,74 @@
         </div>
     </div>
 
-    <script src="app.js?v=6"></script>
+    <!-- Data Consent Modal (shown on first use before any API call) -->
+    <div id="consentModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-dialog consent-dialog">
+            <h3>Data Processing Consent</h3>
+            <div class="consent-content">
+                <p>Before using AIDE Lite, please understand how your data is processed:</p>
+                <ul>
+                    <li><strong>App model data</strong> (entity names, attributes, microflow structures, page names) is sent to Anthropic's Claude API to provide context for AI responses.</li>
+                    <li><strong>Your chat messages</strong> are sent to Anthropic for processing and response generation.</li>
+                    <li><strong>Anthropic</strong> is a US-based company. Your data is transmitted via HTTPS and processed on their infrastructure.</li>
+                    <li><strong>Conversation history</strong> is stored locally on your machine with DPAPI encryption. Up to 50 conversations are retained.</li>
+                    <li><strong>Your API key</strong> is encrypted with DPAPI and stored locally. It is only used to authenticate with Anthropic's API.</li>
+                </ul>
+                <p>You can control the amount of data sent via the <strong>Context Depth</strong> setting (Summary or None sends less data).</p>
+                <p>For more details, see the Privacy Notice (lock icon in the header) or review <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener noreferrer">Anthropic's Privacy Policy</a>.</p>
+            </div>
+            <div class="modal-actions">
+                <button id="consentAcceptBtn" class="primary-btn">I Understand &amp; Accept</button>
+                <button id="consentDeclineBtn" class="secondary-btn">Decline</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Privacy Notice Modal -->
+    <div id="privacyModal" class="modal hidden">
+        <div class="modal-overlay" id="privacyOverlay"></div>
+        <div class="modal-dialog privacy-dialog">
+            <h3>Privacy Notice</h3>
+            <div class="privacy-content">
+                <h4>Data Collected</h4>
+                <ul>
+                    <li><strong>App model context:</strong> Entity names, attribute names/types, association mappings, microflow names/parameters/activities, page names, and enumeration values from your Mendix project.</li>
+                    <li><strong>Chat messages:</strong> Text you type in the chat input.</li>
+                    <li><strong>Tool results:</strong> Data returned by tool calls (model queries, microflow operations).</li>
+                </ul>
+
+                <h4>How Data is Processed</h4>
+                <ul>
+                    <li>Data is sent via <strong>HTTPS</strong> to Anthropic's Claude API (<code>api.anthropic.com</code>) for AI-powered responses.</li>
+                    <li>Anthropic processes data on <strong>US-based infrastructure</strong>.</li>
+                    <li>Refer to <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener noreferrer">Anthropic's Privacy Policy</a> for their data handling practices.</li>
+                </ul>
+
+                <h4>Data Stored Locally</h4>
+                <ul>
+                    <li><strong>API key:</strong> DPAPI-encrypted in <code>%APPDATA%\AideLite\config.json</code></li>
+                    <li><strong>Conversation history:</strong> DPAPI-encrypted in <code>%APPDATA%\AideLite\history\</code> (max 50 conversations)</li>
+                    <li><strong>Debug log:</strong> <code>%APPDATA%\AideLite\debug.log</code> (rotated at 5MB, no message content)</li>
+                </ul>
+
+                <h4>Your Rights</h4>
+                <ul>
+                    <li><strong>Delete conversations:</strong> Use the History panel to delete individual conversations.</li>
+                    <li><strong>Export data:</strong> Use the Export button to download conversations as Markdown.</li>
+                    <li><strong>Control data sent:</strong> Adjust Context Depth in Settings (Summary or None sends less data).</li>
+                    <li><strong>Revoke access:</strong> Remove your API key from Settings at any time.</li>
+                </ul>
+
+                <h4>Third-Party Processing</h4>
+                <p>Anthropic (San Francisco, CA, USA) processes your data as described in their <a href="https://www.anthropic.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>. If your organization is subject to GDPR, review Anthropic's data processing terms before use.</p>
+            </div>
+            <div class="modal-actions">
+                <button id="privacyCloseBtn" class="secondary-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=7"></script>
 </body>
 </html>

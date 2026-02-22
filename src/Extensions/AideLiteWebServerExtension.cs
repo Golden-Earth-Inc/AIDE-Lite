@@ -22,6 +22,7 @@ public class AideLiteWebServerExtension : WebServerExtension
         webServer.AddRoute("aide-lite/settings", ServeFile("WebAssets/settings.html", "text/html; charset=utf-8"));
         webServer.AddRoute("aide-lite/styles.css", ServeFile("WebAssets/styles.css", "text/css; charset=utf-8"));
         webServer.AddRoute("aide-lite/app.js", ServeFile("WebAssets/app.js", "application/javascript; charset=utf-8"));
+        webServer.AddRoute("aide-lite/settings.js", ServeFile("WebAssets/settings.js", "application/javascript; charset=utf-8"));
     }
 
     /// <summary>

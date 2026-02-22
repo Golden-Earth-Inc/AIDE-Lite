@@ -58,6 +58,13 @@
     var exportCancelBtn = document.getElementById('exportCancelBtn');
     var exportOverlay = document.getElementById('exportOverlay');
     var exportToolActivity = document.getElementById('exportToolActivity');
+    var consentModal = document.getElementById('consentModal');
+    var consentAcceptBtn = document.getElementById('consentAcceptBtn');
+    var consentDeclineBtn = document.getElementById('consentDeclineBtn');
+    var privacyBtn = document.getElementById('privacyBtn');
+    var privacyModal = document.getElementById('privacyModal');
+    var privacyCloseBtn = document.getElementById('privacyCloseBtn');
+    var privacyOverlay = document.getElementById('privacyOverlay');
 
     // --- WebView Bridge (C# <-> JS messaging) ---
     function sendToBackend(type, payload) {
@@ -126,6 +133,12 @@
                 break;
             case 'settings_saved':
                 handleSettingsSaved(data);
+                break;
+            case 'consent_required':
+                handleConsentRequired();
+                break;
+            case 'consent_saved':
+                handleConsentSaved();
                 break;
         }
     }
@@ -708,7 +721,31 @@
     }
 
     function handleSettingsSaved(data) {
+        document.getElementById('apiKeyInput').value = '';
         closeSettings();
+    }
+
+    // --- Consent & Privacy ---
+    function handleConsentRequired() {
+        // Stop the processing UI since the message is queued pending consent
+        isStreaming = false;
+        sendBtn.disabled = false;
+        sendBtn.classList.remove('hidden');
+        stopBtn.classList.add('hidden');
+        hideProcessingBar();
+        if (consentModal) consentModal.classList.remove('hidden');
+    }
+
+    function handleConsentSaved() {
+        if (consentModal) consentModal.classList.add('hidden');
+    }
+
+    function openPrivacy() {
+        if (privacyModal) privacyModal.classList.remove('hidden');
+    }
+
+    function closePrivacy() {
+        if (privacyModal) privacyModal.classList.add('hidden');
     }
 
     function saveSettings() {
@@ -1036,6 +1073,20 @@
     if (exportDownloadBtn) exportDownloadBtn.addEventListener('click', exportChat);
     if (exportCancelBtn) exportCancelBtn.addEventListener('click', closeExport);
     if (exportOverlay) exportOverlay.addEventListener('click', closeExport);
+
+    // Consent
+    if (consentAcceptBtn) consentAcceptBtn.addEventListener('click', function () {
+        sendToBackend('consent_accepted');
+        if (consentModal) consentModal.classList.add('hidden');
+    });
+    if (consentDeclineBtn) consentDeclineBtn.addEventListener('click', function () {
+        if (consentModal) consentModal.classList.add('hidden');
+    });
+
+    // Privacy
+    if (privacyBtn) privacyBtn.addEventListener('click', openPrivacy);
+    if (privacyCloseBtn) privacyCloseBtn.addEventListener('click', closePrivacy);
+    if (privacyOverlay) privacyOverlay.addEventListener('click', closePrivacy);
 
     // Close settings modal on overlay click
     document.querySelector('#settingsModal .modal-overlay')?.addEventListener('click', closeSettings);

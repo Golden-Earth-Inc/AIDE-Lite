@@ -150,7 +150,7 @@ Settings are stored in `%APPDATA%\AideLite\config.json`:
 | Setting | Options | Default |
 |---------|---------|---------|
 | Model | `claude-sonnet-4-5-20250929`, `claude-opus-4-6`, `claude-haiku-4-5-20251001` | Sonnet 4.5 |
-| Context Depth | `full` (all modules) or `module` (current only) | full |
+| Context Depth | `full` (all modules), `summary` (lighter), `none` (tools only) | summary |
 | Max Tokens | 256 – 128,000 | 8,192 |
 
 Your API key is encrypted with DPAPI (Windows Data Protection API) using app-specific entropy and stored locally. It never appears in logs, project files, or anywhere in this repository.
@@ -240,8 +240,74 @@ Output goes to `src/bin/Release/net8.0-windows/`.
 - API keys are encrypted with DPAPI using app-specific entropy before storage
 - Keys are never logged, committed, or transmitted outside of Anthropic API calls
 - All model data stays local — context is built in-memory and sent only to the Claude API
-- WebView content is served from local files with no-cache headers
+- Conversation history is DPAPI-encrypted at rest in `%APPDATA%\AideLite\history\`
+- WebView content is served from local files with no-cache headers and strict Content Security Policy
 - Input sanitization prevents XSS in the chat UI
+- Debug logs contain no user message content (only message lengths)
+- Log files rotate at 5 MB with a single backup
+
+## Data Privacy & Compliance
+
+> **Important:** If your organization is subject to GDPR, SOC 2, or other data-protection regulations, review this section and Anthropic's terms before deploying AIDE Lite in a production environment.
+
+### What Data Is Sent
+
+| Data Category | Examples | When Sent |
+|---------------|----------|-----------|
+| App model context | Entity names, attribute names/types, association mappings, microflow names/parameters/activities, page names, enumeration values | Every API call (scope controlled by Context Depth setting) |
+| Chat messages | Text you type in the chat input | Every API call |
+| Tool results | Query results from model reads, microflow creation confirmations | During tool-use rounds |
+
+### Where Data Is Processed
+
+All data is sent via **HTTPS** to Anthropic's Claude API (`api.anthropic.com`). Anthropic is headquartered in **San Francisco, CA, USA** and processes data on US-based infrastructure.
+
+- Review [Anthropic's Privacy Policy](https://www.anthropic.com/privacy) for details on how they handle data.
+- Review [Anthropic's Terms of Service](https://www.anthropic.com/terms) for data processing terms.
+- For enterprise use, contact Anthropic about their Data Processing Addendum (DPA).
+
+### Data Stored Locally
+
+| Item | Location | Protection |
+|------|----------|------------|
+| API key | `%APPDATA%\AideLite\config.json` | DPAPI-encrypted with app-specific entropy |
+| Conversation history | `%APPDATA%\AideLite\history\` | DPAPI-encrypted (max 50 conversations) |
+| Debug log | `%APPDATA%\AideLite\debug.log` | Plaintext, no message content, rotated at 5 MB |
+| User settings | `%APPDATA%\AideLite\config.json` | Plaintext (model, context depth, token limits) |
+
+### GDPR Considerations
+
+- **Lawful basis (Art. 6):** A first-use consent dialog is presented before any data is sent to Anthropic. No API calls are made until the user accepts.
+- **Data minimization (Art. 5(1)(c)):** The default context depth is `summary` to limit the amount of model data transmitted. Users can further reduce this to `none`.
+- **Right to erasure (Art. 17):** Delete individual conversations from the History panel. Remove your API key from Settings to revoke API access.
+- **Data export (Art. 20):** Export conversations as Markdown via the Export button.
+- **Cross-border transfer (Art. 44-49):** Data is transferred to the US. Review Anthropic's transfer mechanisms (Standard Contractual Clauses, etc.) for your compliance requirements.
+- **Data processor (Art. 28):** Anthropic acts as the data processor. Organizations should review Anthropic's DPA for contractual safeguards.
+
+### SOC 2 Considerations
+
+- **CC6.1 (Logical Access):** API keys are DPAPI-encrypted. Conversation history is encrypted at rest. Debug logs contain no sensitive content.
+- **CC6.6 (System Boundaries):** WebView content is served with strict Content Security Policy headers. No inline scripts. All input is sanitized.
+- **C1.1 (Confidentiality):** First-use consent dialog informs users about data processing before any data leaves the machine.
+- **C1.2 (Disposal):** Conversation history is capped at 50 entries. Log files rotate at 5 MB.
+
+### Current Compliance Gaps
+
+| Gap | Risk | Mitigation |
+|-----|------|------------|
+| No formal Anthropic DPA in place | Data processor contract missing | Contact Anthropic for enterprise DPA |
+| .NET 8.0 runtime may have unpatched CVEs | Runtime vulnerabilities | Keep .NET runtime updated to latest patch |
+| No per-conversation data retention policy | Data kept until manually deleted | Users can delete via History panel |
+| No admin audit trail | No central log of who used the extension | Debug log tracks activity locally |
+
+### Recommendations for Enterprise Deployment
+
+1. Review and sign Anthropic's Data Processing Addendum (DPA) before deployment.
+2. Set Context Depth to `summary` or `none` to minimize data exposure.
+3. Keep the .NET 8.0 runtime updated to the latest security patch.
+4. Establish a data retention policy for conversation history.
+5. Ensure users understand and accept the data consent dialog before use.
+6. Consider network-level controls (firewall rules) to restrict outbound traffic to `api.anthropic.com` only.
 
 ## AIDE Pro & Partnerships
 
