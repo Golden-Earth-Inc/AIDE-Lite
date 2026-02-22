@@ -575,9 +575,31 @@ body {
     background: var(--bg-modal);
     border-radius: 12px;
     padding: 24px;
-    width: 380px;
-    max-width: 90%;
+    width: 95%;
+    max-width: 95%;
     box-shadow: 0 10px 40px var(--modal-shadow);
+}
+.modal-close-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+}
+.modal-close-btn:hover {
+    background: #e81123;
+    color: #fff;
 }
 .modal-dialog h3 { font-size: 16px; margin-bottom: 16px; color: var(--text-primary); }
 .form-group { margin-bottom: 14px; }
@@ -754,8 +776,6 @@ body.dark .success-msg { color: #86efac; }
 /* === Help Modal === */
 .help-dialog {
     max-height: 80vh;
-    width: 95%;
-    max-width: 95%;
     display: flex;
     flex-direction: column;
 }
@@ -1161,7 +1181,6 @@ body.dark .file-chip-sent.file-chip-data {
 /* === Consent & Privacy Modals === */
 .consent-dialog,
 .privacy-dialog {
-    width: 440px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
