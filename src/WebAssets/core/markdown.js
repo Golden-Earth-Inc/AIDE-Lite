@@ -22,7 +22,13 @@
 
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (m, lang, code) {
             var idx = codeBlocks.length;
-            codeBlocks.push('<pre><code class="language-' + (lang || '') + '">' + AIDE.escapeHtml(code) + '</code></pre>');
+            var escaped = AIDE.escapeHtml(code);
+            codeBlocks.push(
+                '<div class="code-block-wrapper">' +
+                '<button class="code-copy-btn" title="Copy code" onclick="AIDE.copyCodeBlock(this)">&#x2398;</button>' +
+                '<pre><code class="language-' + (lang || '') + '">' + escaped + '</code></pre>' +
+                '</div>'
+            );
             return '\x00CODEBLOCK' + idx + '\x00';
         });
 
@@ -91,6 +97,8 @@
         html = html.replace(/(<\/h[1-3]>)\s*<\/p>/g, '$1');
         html = html.replace(/<p>\s*(<pre>)/g, '$1');
         html = html.replace(/(<\/pre>)\s*<\/p>/g, '$1');
+        html = html.replace(/<p>\s*(<div class="code-block-wrapper">)/g, '$1');
+        html = html.replace(/(<\/div>)\s*<\/p>/g, '$1');
         html = html.replace(/<p>\s*(<ul>)/g, '$1');
         html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
         html = html.replace(/<p>\s*(<ol>)/g, '$1');
@@ -144,6 +152,21 @@
         });
         clone.querySelectorAll('a').forEach(function (el) {
             el.style.cssText = 'color:#7c3aed;text-decoration:underline;';
+        });
+    };
+
+    AIDE.copyCodeBlock = function (btn) {
+        var wrapper = btn.closest('.code-block-wrapper');
+        if (!wrapper) return;
+        var code = wrapper.querySelector('code');
+        if (!code) return;
+        var text = code.textContent;
+        navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = '\u2713';
+            setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
+        }).catch(function () {
+            btn.textContent = '!';
+            setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
         });
     };
 
