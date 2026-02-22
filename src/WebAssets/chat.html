@@ -30,6 +30,7 @@
                 <button id="newChatBtn" class="icon-btn" title="New Chat" aria-label="New Chat">&#x2795;</button>
                 <button id="privacyBtn" class="icon-btn" title="Privacy Notice" aria-label="Privacy Notice">&#x1F512;</button>
                 <button id="settingsBtn" class="icon-btn" title="Settings" aria-label="Settings">&#x2699;</button>
+                <button id="helpBtn" class="icon-btn" title="Help" aria-label="Help">&#x003F;</button>
             </div>
         </div>
 
@@ -37,6 +38,13 @@
         <div id="contextBar" class="context-bar">
             <span id="contextDot" class="status-dot offline"></span>
             <span id="contextText">No context loaded - click &#x21bb; to refresh</span>
+        </div>
+
+        <!-- Active Document Indicator -->
+        <div id="activeDocBar" class="active-doc-bar hidden">
+            <span id="activeDocIcon" class="active-doc-icon"></span>
+            <span id="activeDocText" class="active-doc-text"></span>
+            <button id="activeDocAddBtn" class="active-doc-add-btn" title="Add to chat context" aria-label="Add to chat context">+</button>
         </div>
 
         <!-- Chat Messages Area -->
@@ -82,10 +90,12 @@
 
         <!-- Input Area -->
         <div class="input-area" id="inputArea">
+            <div id="docPreview" class="doc-preview"></div>
+            <div id="filePreview" class="file-preview"></div>
             <div id="imagePreview" class="image-preview"></div>
             <div class="input-row">
-                <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
-                <button id="attachImageBtn" class="attach-btn" title="Attach image" aria-label="Attach image">&#x2795;</button>
+                <input type="file" id="attachFileInput" accept="image/jpeg,image/png,image/gif,image/webp,.json,.xml,.yaml,.yml,.java,.js,.css,.html,.md,.txt,.log,.csv,.sql,.properties" multiple hidden>
+                <button id="attachBtn" class="attach-btn" title="Attach image or file" aria-label="Attach image or file">&#x2795;</button>
                 <select id="modeSelect" class="mode-select" title="Interaction mode">
                     <option value="agent">Agent</option>
                     <option value="ask">Ask</option>
@@ -209,6 +219,145 @@
             <div class="modal-actions">
                 <button id="exportDownloadBtn" class="primary-btn">Download .md</button>
                 <button id="exportCancelBtn" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal hidden">
+        <div class="modal-overlay" id="helpOverlay"></div>
+        <div class="modal-dialog help-dialog">
+            <h3>&#x2753; AIDE Lite Help</h3>
+            <div class="help-content">
+
+                <div class="help-section">
+                    <h4>&#x1F680; Getting Started</h4>
+                    <ol>
+                        <li>Open AIDE Lite from the <strong>Extensions</strong> menu in Studio Pro.</li>
+                        <li>Click the <span class="help-icon-inline">&#x2699;</span> gear icon to open <strong>Settings</strong>.</li>
+                        <li>Enter your <strong>Claude API Key</strong> (get one at <em>console.anthropic.com</em>). It is encrypted locally and never shared.</li>
+                        <li>Click the <span class="help-icon-inline">&#x21bb;</span> refresh button to load your <strong>App Context</strong>.</li>
+                        <li>Start chatting!</li>
+                    </ol>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F4AC; Chat Modes</h4>
+                    <p>Select from the dropdown next to the input:</p>
+                    <ul>
+                        <li><strong class="help-highlight-agent">Agent</strong> &mdash; Claude can read your app model AND create/edit microflows. Use for making changes.</li>
+                        <li><strong class="help-highlight-ask">Ask</strong> &mdash; Read-only mode. Claude inspects your model but cannot modify anything. Use for questions and analysis.</li>
+                    </ul>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F39B; Header Toolbar</h4>
+                    <table class="help-table">
+                        <tr><td><span class="help-icon-inline">&#x2B07;</span></td><td><strong>Export</strong> &mdash; Download conversation as Markdown</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x1F4CB;</span></td><td><strong>History</strong> &mdash; Browse, load, or delete saved chats</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x1F319;</span></td><td><strong>Theme</strong> &mdash; Toggle Light / Dark mode</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x21bb;</span></td><td><strong>Refresh</strong> &mdash; Reload app context after changes</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x2795;</span></td><td><strong>New Chat</strong> &mdash; Start fresh (current chat auto-saved)</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x1F512;</span></td><td><strong>Privacy</strong> &mdash; View data processing notice</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x2699;</span></td><td><strong>Settings</strong> &mdash; API key, model, context depth, etc.</td></tr>
+                        <tr><td><span class="help-icon-inline">&#x003F;</span></td><td><strong>Help</strong> &mdash; This page</td></tr>
+                    </table>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F4C4; Active Document Tracking</h4>
+                    <p>AIDE automatically detects which document you have open in Studio Pro and shows it in a bar below the context status.</p>
+                    <p>When you send a message, this is automatically included as context so Claude knows what you&rsquo;re looking at. Click the <strong>+</strong> button on the indicator bar to add it as an explicit @-reference chip.</p>
+                    <p>If you add explicit @-chips, the automatic active document context is skipped to avoid redundancy.</p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F5B1; Right-Click Context Menu</h4>
+                    <p>Right-click any <strong>document</strong> (microflow, page) in the App Explorer or any <strong>entity</strong> in the Domain Model editor:</p>
+                    <ul>
+                        <li><strong>Explain with AIDE Lite</strong> &mdash; Opens AIDE and immediately sends &ldquo;Explain @Module.Element&rdquo; to Claude.</li>
+                        <li><strong>Add to AIDE Lite Context</strong> &mdash; Opens AIDE and adds an @-reference chip. You type your own question.</li>
+                    </ul>
+                    <p>Chips are color-coded: <span class="help-chip help-chip-entity">Entity</span> <span class="help-chip help-chip-microflow">Microflow</span> <span class="help-chip help-chip-page">Page</span></p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F4CE; Attachments</h4>
+                    <p>Click the <span class="help-icon-inline">&#x2795;</span> button, <strong>drag &amp; drop</strong> onto the input area, or <strong>paste from clipboard</strong>:</p>
+                    <p><strong>Images</strong> (JPEG, PNG, GIF, WebP &mdash; max 20 MB each):<br>
+                    Shown as thumbnail previews. Claude can see and analyze the image.</p>
+                    <p><strong>Text files</strong> (max 500 KB each):<br>
+                    Shown as file chips. Content is sent as formatted code blocks.</p>
+                    <p>Supported text types:</p>
+                    <ul>
+                        <li><strong>Code:</strong> <code>.java</code> <code>.js</code> <code>.css</code> <code>.html</code> <code>.xml</code></li>
+                        <li><strong>Config/Data:</strong> <code>.json</code> <code>.yaml</code> <code>.yml</code> <code>.properties</code> <code>.csv</code> <code>.sql</code></li>
+                        <li><strong>Documentation:</strong> <code>.md</code> <code>.txt</code> <code>.log</code></li>
+                    </ul>
+                    <p>Click the <strong>&times;</strong> on any thumbnail or chip to remove it before sending.</p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F4AC; Chat History</h4>
+                    <p>Conversations are auto-saved. Access them via the <span class="help-icon-inline">&#x1F4CB;</span> History button. Click a conversation to load it. Click <strong>&times;</strong> to delete.</p>
+                    <p>Enable <strong>Auto-Load Last Conversation</strong> in Settings to restore your most recent chat on startup.</p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F4E4; Export</h4>
+                    <p>Click the <span class="help-icon-inline">&#x2B07;</span> Export button to download the current conversation as a Markdown file. Optionally include tool activity between messages.</p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F527; What Claude Can Do</h4>
+                    <p><strong>Read (9 tools):</strong> List modules, entities, associations, enumerations, pages, microflows. Get full details on entities and microflows. Search any element by name.</p>
+                    <p><strong>Write (5 tools):</strong> Create microflows (21 activity types), rename microflows, add activities, replace microflows, edit activity properties.</p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x2328; Keyboard Shortcuts</h4>
+                    <table class="help-table">
+                        <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
+                        <tr><td><kbd>Shift + Enter</kbd></td><td>New line in input</td></tr>
+                        <tr><td><kbd>Ctrl + V</kbd></td><td>Paste image or file from clipboard</td></tr>
+                    </table>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x1F4DD; Custom Project Rules</h4>
+                    <p>Create a file named <code>.aide-lite-rules.md</code> in the root of your Mendix project. Its content is injected into Claude&rsquo;s system prompt. Use it for project-specific naming conventions, domain terminology, or business logic constraints.</p>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x2699; Settings Reference</h4>
+                    <table class="help-table">
+                        <tr><td><strong>Claude API Key</strong></td><td>Your Anthropic key (encrypted locally)</td></tr>
+                        <tr><td><strong>Model</strong></td><td>Sonnet 4.5 / Sonnet 4.6 / Opus 4.6 / Haiku 4.5</td></tr>
+                        <tr><td><strong>Context Depth</strong></td><td>Full App or Current Module Only</td></tr>
+                        <tr><td><strong>Max Response Tokens</strong></td><td>256 &ndash; 128,000 (default 8,192)</td></tr>
+                        <tr><td><strong>Rate Limit Retries</strong></td><td>Auto-retry count (default 20)</td></tr>
+                        <tr><td><strong>Retry Delay</strong></td><td>Seconds between retries (default 60)</td></tr>
+                        <tr><td><strong>Max Tool Rounds</strong></td><td>Tool-use rounds per message (default 10)</td></tr>
+                        <tr><td><strong>Prompt Caching</strong></td><td>~90% rate limit savings on repeated calls</td></tr>
+                        <tr><td><strong>Auto-Refresh Context</strong></td><td>Load app context on startup</td></tr>
+                        <tr><td><strong>Auto-Load Last Chat</strong></td><td>Restore recent chat on startup</td></tr>
+                        <tr><td><strong>Theme</strong></td><td>Light or Dark</td></tr>
+                    </table>
+                </div>
+
+                <div class="help-section">
+                    <h4>&#x26A0; Known Limitations</h4>
+                    <ul>
+                        <li>No decision, loop, or merge creation (sequential activities only &mdash; Claude guides manual placement)</li>
+                        <li>No page or nanoflow creation</li>
+                        <li>No entity or enumeration creation (read-only domain model)</li>
+                        <li>No security rule APIs</li>
+                    </ul>
+                </div>
+
+            </div>
+            <div class="modal-actions">
+                <button id="helpCloseBtn" class="secondary-btn">Close</button>
             </div>
         </div>
     </div>

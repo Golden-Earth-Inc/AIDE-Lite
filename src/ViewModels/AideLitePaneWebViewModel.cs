@@ -33,6 +33,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
     private readonly IMicroflowExpressionService _expressionService;
     private readonly IUntypedModelAccessService _untypedModelAccessService;
     private IWebView? _webView;
+    private bool _webViewReady;
+    private readonly List<DocumentReference> _pendingReferences = new();
+
+    // Active document tracking — updated by AideLitePaneExtension via ActiveDocumentChanged event
+    private string? _activeDocumentName;
+    private string? _activeDocumentType;
+    private string? _activeDocumentQualifiedName;
 
     // Lazy model accessor — always gets the current app even after project switch (via lambda, not snapshot)
     private IModel? Model => _getModel();
@@ -89,15 +96,76 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
     public override void InitWebView(IWebView webView)
     {
-        // Unsubscribe from previous WebView to prevent duplicate handler accumulation on re-open
         if (_webView != null)
             _webView.MessageReceived -= OnMessageReceived;
 
+        DocumentReferenceStore.OnDocumentReferenced -= OnDocumentReferenced;
+
         _webView = webView;
-        // Cache-busting query param forces the WebView to load fresh JS/CSS during development
+        _webViewReady = false;
         webView.Address = new Uri(_webServerBaseUrl, $"aide-lite/chat?v={DateTime.UtcNow.Ticks}");
         webView.MessageReceived += OnMessageReceived;
-        DiagLog("InitWebView: WebView initialized, MessageReceived handler attached");
+
+        // Drain any references that were enqueued before the pane opened
+        // (context menu fires Enqueue before OpenPane triggers InitWebView)
+        DocumentReferenceStore.DrainAll(r => _pendingReferences.Add(r));
+
+        DocumentReferenceStore.OnDocumentReferenced += OnDocumentReferenced;
+        DiagLog($"InitWebView: WebView initialized, MessageReceived handler attached, drained {_pendingReferences.Count} pending ref(s)");
+    }
+
+    private void OnDocumentReferenced(DocumentReference reference)
+    {
+        if (!_webViewReady)
+        {
+            _pendingReferences.Add(reference);
+            DiagLog($"OnDocumentReferenced: queued '{reference.QualifiedName}' (WebView not ready)");
+            return;
+        }
+
+        SendDocumentReference(reference);
+    }
+
+    private void FlushPendingReferences()
+    {
+        if (_pendingReferences.Count == 0) return;
+
+        SendToWebView("skip_auto_load", new { });
+
+        foreach (var reference in _pendingReferences)
+            SendDocumentReference(reference);
+        _pendingReferences.Clear();
+    }
+
+    private void SendDocumentReference(DocumentReference reference)
+    {
+        var messageType = reference.Action == DocumentAction.Explain
+            ? "auto_explain"
+            : "document_referenced";
+
+        SendToWebView(messageType, new
+        {
+            type = reference.ElementType,
+            qualifiedName = reference.QualifiedName
+        });
+    }
+
+    internal void UpdateActiveDocument(string? name, string? type, string? qualifiedName)
+    {
+        _activeDocumentName = name;
+        _activeDocumentType = type;
+        _activeDocumentQualifiedName = qualifiedName;
+
+        if (!_webViewReady) return;
+
+        if (name == null)
+        {
+            SendToWebView("active_document_changed", new { name = (string?)null, type = (string?)null, qualifiedName = (string?)null });
+        }
+        else
+        {
+            SendToWebView("active_document_changed", new { name, type, qualifiedName });
+        }
     }
 
     /// <summary>
@@ -231,7 +299,12 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     HandleConsentAccepted();
                     break;
                 case "MessageListenerRegistered":
-                    DiagLog("OnMessageReceived: JS message listener registered - bridge ready");
+                    DiagLog("OnMessageReceived: JS message listener registered");
+                    if (!_webViewReady)
+                    {
+                        _webViewReady = true;
+                        FlushPendingReferences();
+                    }
                     break;
                 default:
                     DiagLog($"OnMessageReceived: UNKNOWN type '{messageType}'");
@@ -299,6 +372,10 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             // Validate mode server-side — default to "ask" (least permissive) for unknown values
             var mode = rawMode is "agent" or "ask" ? rawMode : "ask";
             var isAskMode = mode == "ask";
+
+            messageText = PrependFileAttachments(data, messageText);
+            messageText = PrependDocumentReferences(data, messageText);
+            messageText = PrependActiveDocumentContext(data, messageText);
 
             var imageAttachments = ParseImageAttachments(data);
             if (imageAttachments.Count > 0)
@@ -644,6 +721,104 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         }
     }
 
+    private static string PrependFileAttachments(JsonObject? data, string messageText)
+    {
+        const int maxFiles = 10;
+        const long maxTotalContentBytes = 2 * 1024 * 1024; // 2 MB total
+
+        var filesNode = data?["files"];
+        if (filesNode is not JsonArray filesArray || filesArray.Count == 0)
+            return messageText;
+
+        var sb = new System.Text.StringBuilder();
+        var fileCount = 0;
+        long totalContentBytes = 0;
+        foreach (var item in filesArray)
+        {
+            if (fileCount >= maxFiles) break;
+
+            var name = item?["name"]?.GetValue<string>();
+            var language = item?["language"]?.GetValue<string>() ?? "";
+            var content = item?["content"]?.GetValue<string>();
+            if (string.IsNullOrEmpty(name) || content == null) continue;
+
+            totalContentBytes += content.Length;
+            if (totalContentBytes > maxTotalContentBytes) break;
+
+            var sizeLabel = content.Length >= 1024
+                ? $"{content.Length / 1024.0:F1} KB"
+                : $"{content.Length} B";
+
+            sb.AppendLine($"[Attached file: {name} ({language}, {sizeLabel})]");
+            sb.AppendLine($"```{language}");
+            sb.AppendLine(content);
+            sb.AppendLine("```");
+            sb.AppendLine();
+            fileCount++;
+        }
+
+        return sb.Length > 0
+            ? sb.ToString() + messageText
+            : messageText;
+    }
+
+    private static string PrependDocumentReferences(JsonObject? data, string messageText)
+    {
+        var docsNode = data?["documents"];
+        if (docsNode is not JsonArray docsArray || docsArray.Count == 0)
+            return messageText;
+
+        var lines = new List<string>();
+        foreach (var item in docsArray)
+        {
+            var type = item?["type"]?.GetValue<string>() ?? "document";
+            var qname = item?["qualifiedName"]?.GetValue<string>();
+            if (string.IsNullOrEmpty(qname)) continue;
+
+            var toolHint = type switch
+            {
+                "entity" => "use get_entity_details to inspect it",
+                "microflow" => "use get_microflow_details to inspect it",
+                "page" => "use get_pages to list page details",
+                "enumeration" => "use get_enumerations to inspect it",
+                "constant" => "use search_model to find constant details",
+                "java_action" => "use search_model to find Java action details",
+                _ => "use search_model to find more information"
+            };
+            lines.Add($"[The user is asking about: @{qname} ({type}) — {toolHint}]");
+        }
+
+        return lines.Count > 0
+            ? string.Join("\n", lines) + "\n\n" + messageText
+            : messageText;
+    }
+
+    private string PrependActiveDocumentContext(JsonObject? data, string messageText)
+    {
+        // Skip if explicit document references were already added
+        var docsNode = data?["documents"];
+        if (docsNode is JsonArray { Count: > 0 })
+            return messageText;
+
+        if (string.IsNullOrEmpty(_activeDocumentQualifiedName))
+            return messageText;
+
+        var type = _activeDocumentType ?? "document";
+        var toolHint = type switch
+        {
+            "microflow" => "use get_microflow_details to inspect it",
+            "page" => "use get_pages to list page details",
+            "entity" => "use get_entity_details to inspect it",
+            "enumeration" => "use get_enumerations to inspect it",
+            "constant" => "use search_model to find constant details",
+            "java_action" => "use search_model to find Java action details",
+            _ => "use search_model to find more information"
+        };
+
+        var contextLine = $"[The user is currently viewing: @{_activeDocumentQualifiedName} ({type}) — {toolHint}]";
+        return contextLine + "\n\n" + messageText;
+    }
+
     private static readonly HashSet<string> AllowedImageMediaTypes = new(StringComparer.Ordinal)
     {
         "image/jpeg", "image/png", "image/gif", "image/webp"
@@ -651,12 +826,13 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
     private List<ImageAttachment> ParseImageAttachments(JsonObject? data)
     {
+        const int maxImages = 5;
+        const long maxTotalBase64Bytes = 20 * 1024 * 1024; // 20 MB total
+
         var result = new List<ImageAttachment>();
         var imagesNode = data?["images"];
         if (imagesNode is not JsonArray imagesArray) return result;
 
-        const int maxImages = 5;
-        const long maxTotalBase64Bytes = 20 * 1024 * 1024; // 20 MB total
         long totalBase64Bytes = 0;
 
         foreach (var item in imagesArray)
@@ -679,7 +855,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             totalBase64Bytes += base64.Length;
             if (totalBase64Bytes > maxTotalBase64Bytes)
             {
-                DiagLog($"ParseImageAttachments: total base64 size exceeds {maxTotalBase64Bytes / (1024 * 1024)}MB cap, skipping remaining");
+                DiagLog($"ParseImageAttachments: total base64 size exceeds {maxTotalBase64Bytes / (1024 * 1024)}MB, skipping remaining");
                 break;
             }
 
@@ -768,8 +944,14 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         _isChatProcessing = false;
         _conversation?.Clear();
         _cachedContext = null;
+        _webViewReady = false;
+        _pendingReferences.Clear();
+        _activeDocumentName = null;
+        _activeDocumentType = null;
+        _activeDocumentQualifiedName = null;
         _currentConversationId = null;
         _currentConversationTitle = null;
+        DocumentReferenceStore.OnDocumentReferenced -= OnDocumentReferenced;
         if (_webView != null)
         {
             _webView.MessageReceived -= OnMessageReceived;
