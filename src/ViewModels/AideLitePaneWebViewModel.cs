@@ -272,6 +272,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     HandleGetContext();
                     break;
                 case "get_settings":
+                    MarkWebViewReady();
                     HandleGetSettings();
                     break;
                 case "save_settings":
@@ -303,11 +304,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     break;
                 case "MessageListenerRegistered":
                     DiagLog("OnMessageReceived: JS message listener registered");
-                    if (!_webViewReady)
-                    {
-                        _webViewReady = true;
-                        FlushPendingReferences();
-                    }
+                    MarkWebViewReady();
                     break;
                 default:
                     DiagLog($"OnMessageReceived: UNKNOWN type '{messageType}'");
@@ -319,6 +316,19 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             DiagLog($"OnMessageReceived: EXCEPTION: {ex}");
             SendToWebView("error", new { message = "An internal error occurred. Check the AIDE Lite log for details.", code = "internal" });
         }
+    }
+
+    /// <summary>
+    /// Marks the WebView as ready and flushes any pending document references.
+    /// Called on both MessageListenerRegistered (primary) and get_settings (fallback)
+    /// because MessageListenerRegistered may be lost during WebView navigation.
+    /// </summary>
+    private void MarkWebViewReady()
+    {
+        if (_webViewReady) return;
+        _webViewReady = true;
+        DiagLog("MarkWebViewReady: WebView bridge ready, flushing pending references");
+        FlushPendingReferences();
     }
 
     private async void HandleChatMessage(JsonObject? data)
