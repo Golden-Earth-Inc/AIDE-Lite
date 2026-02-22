@@ -57,3 +57,17 @@ This opens Studio Pro directly into the project without the startup dialog.
 - If Studio Pro is not running in Step 1, skip straight to Step 2.
 - Always verify the build succeeded (exit code 0) before copying.
 - The `.mpr` project path above is per-project. If the user switches to a different Mendix project, ask them for the new `.mpr` path and update Step 4 accordingly.
+
+## Mac Usage (via Parallels)
+
+When developing from macOS, use `./build.sh` instead of running PowerShell directly. It bridges to the Parallels VM via `prlctl exec`:
+
+```bash
+./build.sh all      # Full cycle: close → build → deploy → launch
+./build.sh build    # Build only (check for compile errors)
+./build.sh rebuild  # Close → build → deploy (no launch)
+./build.sh quick    # Build → deploy (assumes Studio Pro already closed)
+./build.sh status   # Check Studio Pro state and deployment info
+```
+
+The helper script `build-helper.ps1` runs inside Windows and contains all the same paths/logic as the steps above.
