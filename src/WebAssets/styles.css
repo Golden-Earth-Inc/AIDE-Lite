@@ -638,6 +638,11 @@ body {
     font-size: 13px;
 }
 .secondary-btn:hover { background: var(--bg-secondary-btn-hover); }
+.danger-btn { color: #dc2626; border-color: #dc2626; }
+.danger-btn:hover { background: #dc2626; color: #fff; }
+#confirmClearModal { z-index: 110; }
+.confirm-dialog { width: auto; max-width: 320px; text-align: center; }
+.confirm-dialog p { font-size: 13px; color: var(--text-primary); margin: 0 0 16px; line-height: 1.5; }
 
 /* === Settings body (for modal dialog page) === */
 .settings-body { background: var(--bg-secondary); padding: 16px; color: var(--text-primary); }
