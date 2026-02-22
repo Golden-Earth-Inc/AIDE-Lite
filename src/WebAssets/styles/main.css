@@ -128,14 +128,17 @@ body {
 /* === Header (stays dark in both themes) === */
 .header {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
     padding: 8px 12px;
+    gap: 4px;
     background: #1a1a2e;
     color: #fff;
     flex-shrink: 0;
 }
-.header-left { display: flex; align-items: center; gap: 8px; }
+.header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.header-left .title { white-space: nowrap; }
 .title { font-weight: 600; font-size: 14px; }
 .model-badge {
     font-size: 10px;
@@ -143,6 +146,7 @@ body {
     border-radius: 10px;
     background: rgba(255,255,255,0.15);
     color: #aaa;
+    white-space: nowrap;
 }
 .version-badge {
     font-size: 9px;
@@ -151,8 +155,9 @@ body {
     background: rgba(124,111,239,0.3);
     color: #b0a8ff;
     font-family: 'Cascadia Code', 'Fira Code', monospace;
+    white-space: nowrap;
 }
-.header-actions { display: flex; gap: 4px; }
+.header-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .icon-btn {
     background: none;
     border: 1px solid rgba(255,255,255,0.2);
@@ -162,6 +167,7 @@ body {
     border-radius: 4px;
     font-size: 14px;
     line-height: 1;
+    flex-shrink: 0;
 }
 .icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
