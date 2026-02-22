@@ -85,9 +85,6 @@
             case 'consent_saved':
                 AIDE.handleConsentSaved();
                 break;
-            case 'restore_view_state':
-                AIDE.handleRestoreViewState(data);
-                break;
             case 'set_view_mode':
                 AIDE.handleSetViewMode(data);
                 break;

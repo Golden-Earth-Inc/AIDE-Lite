@@ -149,7 +149,7 @@
         var btn = AIDE.dom.toggleViewBtn;
         if (!btn) return;
         var mode = state.get('viewMode');
-        if (mode === 'tab') {
+        if (mode === AIDE.CONST.VIEW_MODES.TAB) {
             btn.innerHTML = '&#x29C9;'; // ⧉ restore down / windowed
             btn.title = 'Collapse to sidebar pane';
         } else {
@@ -162,13 +162,6 @@
         if (!data || !data.mode) return;
         state.set('viewMode', data.mode);
         AIDE.updateToggleButton();
-    };
-
-    AIDE.handleRestoreViewState = function (data) {
-        if (!data) return;
-        // Active document is restored via the ChatController sending active_document_changed.
-        // The conversation_loaded message (sent separately) restores the display history.
-        // This handler can be extended if more state needs restoring.
     };
 
 })(window.AIDE = window.AIDE || {});

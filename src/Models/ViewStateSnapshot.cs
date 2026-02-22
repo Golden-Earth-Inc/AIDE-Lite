@@ -14,9 +14,6 @@ namespace AideLite.Models;
 public class ViewStateSnapshot
 {
     public List<DisplayHistoryEntry> DisplayHistory { get; init; } = new();
-    public int CumulativeInputTokens { get; init; }
-    public int CumulativeOutputTokens { get; init; }
-    public string? ContextStatus { get; init; }
     public string? ActiveDocumentName { get; init; }
     public string? ActiveDocumentType { get; init; }
     public string? ActiveDocumentQualifiedName { get; init; }

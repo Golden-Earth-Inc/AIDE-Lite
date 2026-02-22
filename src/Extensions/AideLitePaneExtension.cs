@@ -25,7 +25,6 @@ public class AideLitePaneExtension : DockablePaneExtension
     // Shared pane ID referenced by other extensions (e.g., context menu, menu items) to open this pane
     public const string PaneId = "aide-lite-chat";
 
-    private readonly IMessageBoxService _messageBoxService;
     private readonly IDockingWindowService _dockingService;
     private readonly ILogService _logService;
     private readonly IHttpClientService _httpClientService;
@@ -44,7 +43,6 @@ public class AideLitePaneExtension : DockablePaneExtension
     // All Mendix services are injected by MEF via [ImportingConstructor]
     [ImportingConstructor]
     public AideLitePaneExtension(
-        IMessageBoxService messageBoxService,
         IDockingWindowService dockingService,
         ILogService logService,
         IHttpClientService httpClientService,
@@ -54,7 +52,6 @@ public class AideLitePaneExtension : DockablePaneExtension
         IMicroflowExpressionService expressionService,
         IUntypedModelAccessService untypedModelAccessService)
     {
-        _messageBoxService = messageBoxService;
         _dockingService = dockingService;
         _logService = logService;
         _httpClientService = httpClientService;
@@ -75,19 +72,16 @@ public class AideLitePaneExtension : DockablePaneExtension
     {
         _configService ??= new ConfigurationService(_logService, null);
 
-        if (_chatController == null)
-        {
-            _chatController = new ChatController(
-                () => CurrentApp,
-                _logService,
-                _configService,
-                _httpClientService,
-                _domainModelService,
-                _microflowService,
-                _activitiesService,
-                _expressionService,
-                _untypedModelAccessService);
-        }
+        _chatController ??= new ChatController(
+            () => CurrentApp,
+            _logService,
+            _configService,
+            _httpClientService,
+            _domainModelService,
+            _microflowService,
+            _activitiesService,
+            _expressionService,
+            _untypedModelAccessService);
 
         if (_viewCoordinator == null)
         {
@@ -118,19 +112,14 @@ public class AideLitePaneExtension : DockablePaneExtension
         _currentViewModel = new AideLitePaneWebViewModel(_chatController!, WebServerBaseUrl);
 
         // Track active document changes and forward to ViewModel
-        if (_activeDocSubscription != null)
-            Unsubscribe(_activeDocSubscription);
+        UnsubscribeFromActiveDocument();
         _activeDocSubscription = Subscribe<ActiveDocumentChanged>(e => OnActiveDocumentChanged(e));
 
         // OnClosed callback: detach WebView but preserve conversation state in ChatController
         _currentViewModel.OnClosed = () =>
         {
             _logService.Info("AIDE Lite: Pane closed");
-            if (_activeDocSubscription != null)
-            {
-                Unsubscribe(_activeDocSubscription);
-                _activeDocSubscription = null;
-            }
+            UnsubscribeFromActiveDocument();
 
             if (_viewCoordinator!.IsToggling)
             {
@@ -144,6 +133,15 @@ public class AideLitePaneExtension : DockablePaneExtension
             _viewCoordinator.OnPaneClosed();
         };
         return _currentViewModel;
+    }
+
+    private void UnsubscribeFromActiveDocument()
+    {
+        if (_activeDocSubscription != null)
+        {
+            Unsubscribe(_activeDocSubscription);
+            _activeDocSubscription = null;
+        }
     }
 
     private void OnActiveDocumentChanged(ActiveDocumentChanged e)

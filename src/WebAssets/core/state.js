@@ -7,6 +7,7 @@
 
     // --- Constants ---
     AIDE.CONST = {
+        VIEW_MODES: { PANE: 'pane', TAB: 'tab' },
         MAX_IMAGE_SIZE: 20 * 1024 * 1024,
         MAX_FILE_SIZE: 500 * 1024,
         MAX_TEXTAREA_HEIGHT: 120,
@@ -37,7 +38,7 @@
         initialSettingsLoaded: false,
         skipAutoLoadConversation: false,
         activeDocument: null,
-        viewMode: 'pane'
+        viewMode: AIDE.CONST.VIEW_MODES.PANE
     };
 
     AIDE.state = {
@@ -60,6 +61,7 @@
             _state.retryCountdownInterval = null;
             _state.retryAttemptCount = 0;
             _state.autoLoadPending = false;
+            _state.viewMode = AIDE.CONST.VIEW_MODES.PANE;
         }
     };
 
