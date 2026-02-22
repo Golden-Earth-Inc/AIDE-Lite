@@ -69,6 +69,109 @@ association Order_Customer (*→1 Customer with Name:String):
 - Max 2 associations deep in XPath; break into multiple retrieves beyond that
 - Retrieve All + List Filter = anti-pattern when XPath constraint would work
 
+## OQL Syntax Reference (CRITICAL — follow exactly)
+
+### Association JOIN Syntax (the #1 OQL rule)
+- NEVER use SQL-style ON conditions: `LEFT JOIN Entity AS e ON e/Association = source`
+- ALWAYS use Mendix association path syntax: `source/Module.Association_Name/Module.Entity AS e`
+- Association paths MUST start from an entity already in query context (FROM or previous JOIN)
+- Format: `source_alias/Module.AssociationName/Module.TargetEntity AS target_alias`
+- Use LEFT OUTER JOIN for optional relationships
+- Example:
+  ```
+  FROM GroupView.DayGroup AS dg
+  INNER JOIN dg/GroupView.DayGroup_Timesheet/Timesheets.Timesheet AS ts
+  LEFT OUTER JOIN dg/GroupView.DayGroupAssignment_DayGroup/GroupView.DayGroupAssignment AS dga
+  ```
+
+### Reserved Words Handling
+- Source columns that are reserved words MUST be double-quoted: `entity."From"`, `entity."Date"`, `entity."Day"`
+- Column aliases MUST NEVER be reserved words — use descriptive names instead
+- Common reserved words: From, To, Date, Day, Group, Status, Order, User, Time, Year, Month
+- Correct: `dg."Day" AS DayOfWeek`, `ts."From" AS TimesheetFrom`
+- Wrong: `dg."Day" AS "Day"` — alias is reserved word
+
+### Association Path Verification (before writing any JOIN)
+- Verify the association owner from the entity details in the APP MODEL
+- Check the exact association name (case-sensitive)
+- Confirm the multiplicity (OneToMany, ManyToOne, OneToOne, ManyToMany)
+- Determine the correct traversal direction
+- Path pattern: `currentAlias/OwnerModule.AssociationName/TargetModule.TargetEntity`
+
+### Entity and Module Qualification
+- Always use full module paths: `Module.Entity` format
+- Include module prefix for both associations and entities
+- Verify exact module names from the APP MODEL
+
+### Aliasing Conventions
+- Use consistent, meaningful short aliases (e.g., `dg` for DayGroup, `ts` for Timesheet)
+- Aliases must not conflict with reserved words
+- All fields MUST have aliases in OQL
+
+### SELECT Syntax
+- `SELECT alias.Attribute AS AliasName FROM Module.Entity AS alias`
+- DISTINCT: `SELECT DISTINCT ...`
+- Format multi-column SELECT lists with one column per line
+
+### WHERE Clause
+- String: `WHERE o.Name = 'John'` (single quotes)
+- Number: `WHERE o.Amount > 100`
+- Boolean: `WHERE o.IsActive = true` (no parentheses — unlike XPath)
+- NULL: `WHERE o.Description IS NULL` / `IS NOT NULL`
+- Enum: `WHERE o.Status = 'Active'` (enum value name as string)
+- AND/OR: `WHERE o.Status = 'Open' AND o.IsUrgent = true`
+- NOT: `WHERE NOT (o.Status = 'Closed')`
+- IN: `WHERE o.Status IN ('Open', 'InProgress')`
+- LIKE: `WHERE o.Name LIKE '%search%'`
+
+### Aggregates, GROUP BY, HAVING
+- `SELECT o.Status, COUNT(*), SUM(o.Amount) FROM Module.Entity AS o GROUP BY o.Status`
+- `HAVING COUNT(*) > 5`
+
+### ORDER BY, LIMIT/OFFSET
+- ORDER BY REQUIRES a LIMIT or OFFSET — OQL will error without one. View entities have no inherent order; sorting only defines data subsets with LIMIT/OFFSET. Sort at the presentation layer (e.g., Retrieve microflow activity) when you need display ordering without pagination.
+- `ORDER BY o.CreatedDate DESC LIMIT 100 OFFSET 0`
+- If you only need sorting without pagination, do NOT use ORDER BY in OQL — sort in the Retrieve activity or list operation instead
+- NEVER add ORDER BY, LIMIT, or OFFSET unless the user explicitly requests sorting, pagination, or a limited result set. By default, return all matching rows unsorted.
+
+### Date Functions
+- `DATEPART(YEAR, o.CreatedDate)`
+- `DATEDIFF(DAY, o.StartDate, o.EndDate)`
+
+### Query Structure Requirements
+- Use uppercase for SQL keywords: SELECT, FROM, INNER JOIN, LEFT OUTER JOIN, WHERE, ORDER BY
+- Maintain clear visual separation between query sections
+- Proper indentation for readability
+- Never add comment lines in OQL queries
+
+### Key Differences from SQL
+| SQL | Mendix OQL |
+|-----|------------|
+| `table_name` | `Module.EntityName` (always qualified) |
+| `JOIN ... ON a.id = b.fk` | `JOIN alias/Module.Association/Module.Entity` |
+| `true`/`false` | `true`/`false` (no parentheses) |
+| `NULL` | `NULL` (same, use IS NULL) |
+
+### OQL Verification Checklist
+Before finalizing any OQL query, verify:
+- All reserved words in source columns are quoted
+- No reserved words used as column aliases
+- All JOINs use association path syntax (no ON clauses)
+- All association paths start from entities already in query context
+- Association names and directions verified against APP MODEL
+- Module prefixes included for all entities and associations
+- All fields have aliases
+- Query is properly indented and formatted
+- No comment lines in the query
+
+### OQL Error Prevention
+If any entity, association name, or path is ambiguous:
+- STOP and check the APP MODEL first
+- Verify the exact entity name, module, and association details
+- Confirm association ownership and multiplicity
+- Only then construct the JOIN path
+- Never assume association names or directions — always verify
+
 ## Performance
 - NEVER do database calls inside loops (N+1 problem). Retrieve list before loop, filter in memory
 - Use Aggregate List (COUNT/SUM/AVG/MIN/MAX) over retrieve-and-count — runs at DB level

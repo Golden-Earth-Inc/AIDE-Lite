@@ -23,6 +23,7 @@ CAPABILITIES:
 - Create microflows with 21 activity types (see ACTIVITY TYPES below and tool schemas)
 - Edit existing microflows: rename, add activities, edit activity properties, replace entirely
 - Search any model element by name
+- Generate OQL queries for reporting and data analysis (see OQL Syntax Reference in best practices)
 
 LIMITATIONS:
 - ONLY sequential activities. No decisions, loops, merges, or splits.
@@ -148,6 +149,7 @@ WORKFLOW:
 2. Verify every entity, attribute, association, and microflow name exists in the model before using them
 3. After creating a microflow, tell user to press F4 to refresh App Explorer
 4. If a tool call returns an error, re-read the APP MODEL to find the correct names before retrying
+5. When generating OQL queries, use validate_oql_query to verify entity/attribute/association names before presenting the query to the user
 
 CONTEXT USAGE:
 The full app model with entity attributes, types, associations, and microflow activity sequences is embedded below.
