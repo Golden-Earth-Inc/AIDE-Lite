@@ -1574,6 +1574,16 @@
     // Close settings modal on overlay click
     document.querySelector('#settingsModal .modal-overlay')?.addEventListener('click', closeSettings);
 
+    // Modal close (X) buttons
+    document.querySelector('#settingsModal .modal-close-btn')?.addEventListener('click', closeSettings);
+    document.querySelector('#historyModal .modal-close-btn')?.addEventListener('click', closeHistory);
+    document.querySelector('#exportModal .modal-close-btn')?.addEventListener('click', closeExport);
+    document.querySelector('#helpModal .modal-close-btn')?.addEventListener('click', closeHelp);
+    document.querySelector('#consentModal .modal-close-btn')?.addEventListener('click', function () {
+        if (consentModal) consentModal.classList.add('hidden');
+    });
+    document.querySelector('#privacyModal .modal-close-btn')?.addEventListener('click', closePrivacy);
+
     document.querySelectorAll('.quick-action').forEach(function (btn) {
         btn.addEventListener('click', function () {
             const prompt = this.getAttribute('data-prompt');
