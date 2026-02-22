@@ -211,10 +211,9 @@
     if (d.privacyCloseBtn) d.privacyCloseBtn.addEventListener('click', AIDE.closePrivacy);
     if (d.privacyOverlay) d.privacyOverlay.addEventListener('click', AIDE.closePrivacy);
 
-    // Toggle view button
+    // Toggle view button (button is disabled during streaming via views/chat.js)
     if (d.toggleViewBtn) {
         d.toggleViewBtn.addEventListener('click', function () {
-            if (state.get('isStreaming')) return; // disabled during streaming
             AIDE.sendToBackend('toggle_view');
         });
     }
@@ -223,7 +222,7 @@
     (function () {
         var params = new URLSearchParams(window.location.search);
         var mode = params.get('mode');
-        if (mode === 'tab' || mode === 'pane') {
+        if (mode === AIDE.CONST.VIEW_MODES.TAB || mode === AIDE.CONST.VIEW_MODES.PANE) {
             state.set('viewMode', mode);
         }
         AIDE.updateToggleButton();

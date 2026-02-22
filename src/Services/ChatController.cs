@@ -141,8 +141,6 @@ public class ChatController
     {
         return new ViewStateSnapshot
         {
-            CumulativeInputTokens = 0, // JS side tracks these; we'll restore from JS
-            CumulativeOutputTokens = 0,
             ActiveDocumentName = _activeDocumentName,
             ActiveDocumentType = _activeDocumentType,
             ActiveDocumentQualifiedName = _activeDocumentQualifiedName,
