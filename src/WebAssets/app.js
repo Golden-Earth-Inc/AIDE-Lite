@@ -988,7 +988,7 @@
         }
 
         lines.push('---');
-        lines.push('*Exported from AIDE Lite v1.2.0*');
+        lines.push('*Exported from AIDE Lite v1.3.0*');
 
         const markdown = lines.join('\n');
         const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });

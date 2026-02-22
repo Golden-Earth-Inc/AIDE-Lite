@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <RootNamespace>AideLite</RootNamespace>
     <AssemblyName>AideLite</AssemblyName>
   </PropertyGroup>
