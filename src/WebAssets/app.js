@@ -320,7 +320,7 @@
                 docContainer.className = 'doc-attachments';
                 documents.forEach(function (doc) {
                     const chip = document.createElement('span');
-                    chip.className = 'doc-chip doc-chip-sent doc-chip-' + doc.type;
+                    chip.className = 'doc-chip doc-chip-sent doc-chip-' + safeElementType(doc.type);
                     chip.textContent = '@' + doc.qualifiedName;
                     docContainer.appendChild(chip);
                 });
@@ -520,7 +520,7 @@
         const total = inputTokens + outputTokens;
 
         function makeSpan(cls, text) {
-            var s = document.createElement('span');
+            const s = document.createElement('span');
             s.className = cls;
             s.textContent = text;
             return s;
@@ -541,7 +541,7 @@
         div.appendChild(makeSpan('token-total', formatTokens(total) + ' total'));
 
         if (cacheCreation > 0 || cacheRead > 0) {
-            var cacheText = 'Cache: ' +
+            const cacheText = 'Cache: ' +
                 (cacheRead > 0 ? formatTokens(cacheRead) + ' hit' : '') +
                 (cacheRead > 0 && cacheCreation > 0 ? ', ' : '') +
                 (cacheCreation > 0 ? formatTokens(cacheCreation) + ' written' : '');
@@ -669,41 +669,41 @@
         historyList.textContent = '';
 
         if (conversations.length === 0) {
-            var emptyP = document.createElement('p');
+            const emptyP = document.createElement('p');
             emptyP.className = 'history-empty';
             emptyP.textContent = 'No saved conversations yet.';
             historyList.appendChild(emptyP);
             return;
         }
 
-        for (var i = 0; i < conversations.length; i++) {
-            var conv = conversations[i];
-            var date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
+        for (let i = 0; i < conversations.length; i++) {
+            const conv = conversations[i];
+            const date = new Date(conv.updatedAt).toLocaleDateString(undefined, {
                 month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
             });
             let title = conv.title || 'Untitled';
             if (title.length > 70) title = title.substring(0, 70) + '...';
             const msgCount = conv.messageCount || 0;
 
-            var item = document.createElement('div');
+            const item = document.createElement('div');
             item.className = 'history-item';
             item.dataset.id = conv.id;
 
-            var main = document.createElement('div');
+            const main = document.createElement('div');
             main.className = 'history-item-main';
 
-            var titleDiv = document.createElement('div');
+            const titleDiv = document.createElement('div');
             titleDiv.className = 'history-item-title';
             titleDiv.textContent = title;
 
-            var metaDiv = document.createElement('div');
+            const metaDiv = document.createElement('div');
             metaDiv.className = 'history-item-meta';
             metaDiv.textContent = date + ' \u00B7 ' + msgCount + ' messages';
 
             main.appendChild(titleDiv);
             main.appendChild(metaDiv);
 
-            var delBtn = document.createElement('button');
+            const delBtn = document.createElement('button');
             delBtn.className = 'history-delete-btn';
             delBtn.dataset.id = conv.id;
             delBtn.title = 'Delete';
@@ -1122,6 +1122,10 @@
 
     // --- Image Attachment Handling ---
     function addImageFile(file) {
+        if (pendingImages.length >= 5) {
+            showToast('Maximum 5 images per message.');
+            return;
+        }
         if (!file.type || !ALLOWED_IMAGE_TYPES[file.type]) {
             showToast('Unsupported image format. Use JPEG, PNG, GIF, or WebP.');
             return;
@@ -1199,6 +1203,10 @@
     }
 
     function addTextFile(file) {
+        if (pendingFiles.length >= 10) {
+            showToast('Maximum 10 files per message.');
+            return;
+        }
         var ext = getFileExtension(file.name);
         var language = ALLOWED_FILE_EXTENSIONS[ext];
         if (!language) {
@@ -1275,6 +1283,12 @@
         });
     }
 
+    // --- Type Validation ---
+    function safeElementType(type) {
+        const allowed = { 'microflow': true, 'page': true, 'entity': true, 'constant': true, 'enumeration': true, 'java_action': true, 'document': true };
+        return allowed[type] ? type : 'document';
+    }
+
     // --- Active Document Tracking ---
     function handleActiveDocumentChanged(data) {
         if (!data || !data.name) {
@@ -1297,7 +1311,7 @@
             return;
         }
         activeDocBar.classList.remove('hidden');
-        activeDocBar.className = 'active-doc-bar active-doc-' + activeDocument.type;
+        activeDocBar.className = 'active-doc-bar active-doc-' + safeElementType(activeDocument.type);
 
         var iconMap = {
             'microflow': '\u2699',
@@ -1320,7 +1334,11 @@
 
     function handleDocumentReferenced(data) {
         if (!data || !data.qualifiedName) return;
-        var already = pendingDocuments.some(function (d) { return d.qualifiedName === data.qualifiedName; });
+        if (pendingDocuments.length >= 10) {
+            showToast('Maximum 10 document references per message.');
+            return;
+        }
+        const already = pendingDocuments.some(function (d) { return d.qualifiedName === data.qualifiedName; });
         if (!already) {
             pendingDocuments.push({ type: data.type || 'document', qualifiedName: data.qualifiedName });
             renderDocumentPreviews();
@@ -1329,7 +1347,7 @@
     }
 
     function renderDocumentPreviews() {
-        var container = document.getElementById('docPreview');
+        const container = document.getElementById('docPreview');
         if (!container) return;
         container.innerHTML = '';
         if (pendingDocuments.length === 0) {
@@ -1338,21 +1356,21 @@
         }
         container.classList.add('has-docs');
         pendingDocuments.forEach(function (doc, idx) {
-            var chip = document.createElement('div');
-            chip.className = 'doc-chip doc-chip-' + doc.type;
+            const chip = document.createElement('div');
+            chip.className = 'doc-chip doc-chip-' + safeElementType(doc.type);
 
-            var label = document.createElement('span');
+            const label = document.createElement('span');
             label.className = 'doc-chip-name';
             label.textContent = '@' + doc.qualifiedName;
 
-            var removeBtn = document.createElement('button');
+            const removeBtn = document.createElement('button');
             removeBtn.className = 'doc-chip-remove';
             removeBtn.innerHTML = '\u00D7';
             removeBtn.title = 'Remove';
             removeBtn.setAttribute('aria-label', 'Remove ' + doc.qualifiedName);
             removeBtn.setAttribute('data-idx', idx);
             removeBtn.addEventListener('click', function () {
-                var i = parseInt(this.getAttribute('data-idx'), 10);
+                const i = parseInt(this.getAttribute('data-idx'), 10);
                 pendingDocuments.splice(i, 1);
                 renderDocumentPreviews();
             });

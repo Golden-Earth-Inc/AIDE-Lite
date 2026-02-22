@@ -83,7 +83,7 @@ public class AideLiteDocumentContextMenuExtension : ContextMenuExtension<IDocume
                 if (module.FromAppStore) continue;
                 foreach (var doc in module.GetDocuments())
                 {
-                    if (doc.Name == document.Name)
+                    if (ReferenceEquals(doc, document))
                         return $"{module.Name}.{document.Name}";
                 }
             }

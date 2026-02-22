@@ -263,13 +263,6 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
             DiagLog($"OnMessageReceived: type='{messageType}', hasData={data != null}");
 
-            if (!_webViewReady)
-            {
-                _webViewReady = true;
-                DiagLog("OnMessageReceived: WebView bridge ready, flushing pending references");
-                FlushPendingReferences();
-            }
-
             switch (messageType)
             {
                 case "chat":
@@ -307,6 +300,11 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                     break;
                 case "MessageListenerRegistered":
                     DiagLog("OnMessageReceived: JS message listener registered");
+                    if (!_webViewReady)
+                    {
+                        _webViewReady = true;
+                        FlushPendingReferences();
+                    }
                     break;
                 default:
                     DiagLog($"OnMessageReceived: UNKNOWN type '{messageType}'");
@@ -613,6 +611,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
         _conversation?.Clear();
         _currentConversationId = null;
         _currentConversationTitle = null;
+        _currentConversationCreatedAt = default;
         _logService.Info("AIDE Lite: Chat cleared");
     }
 
@@ -722,17 +721,27 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
     private static string PrependFileAttachments(JsonObject? data, string messageText)
     {
+        const int maxFiles = 10;
+        const long maxTotalContentBytes = 2 * 1024 * 1024; // 2 MB total
+
         var filesNode = data?["files"];
         if (filesNode is not JsonArray filesArray || filesArray.Count == 0)
             return messageText;
 
         var sb = new System.Text.StringBuilder();
+        var fileCount = 0;
+        long totalContentBytes = 0;
         foreach (var item in filesArray)
         {
+            if (fileCount >= maxFiles) break;
+
             var name = item?["name"]?.GetValue<string>();
             var language = item?["language"]?.GetValue<string>() ?? "";
             var content = item?["content"]?.GetValue<string>();
             if (string.IsNullOrEmpty(name) || content == null) continue;
+
+            totalContentBytes += content.Length;
+            if (totalContentBytes > maxTotalContentBytes) break;
 
             var sizeLabel = content.Length >= 1024
                 ? $"{content.Length / 1024.0:F1} KB"
@@ -743,6 +752,7 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
             sb.AppendLine(content);
             sb.AppendLine("```");
             sb.AppendLine();
+            fileCount++;
         }
 
         return sb.Length > 0
@@ -814,12 +824,22 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
 
     private List<ImageAttachment> ParseImageAttachments(JsonObject? data)
     {
+        const int maxImages = 5;
+        const long maxTotalBase64Bytes = 20 * 1024 * 1024; // 20 MB total
+
         var result = new List<ImageAttachment>();
         var imagesNode = data?["images"];
         if (imagesNode is not JsonArray imagesArray) return result;
 
+        long totalBase64Bytes = 0;
         foreach (var item in imagesArray)
         {
+            if (result.Count >= maxImages)
+            {
+                DiagLog($"ParseImageAttachments: max image count ({maxImages}) reached, skipping remaining");
+                break;
+            }
+
             var base64 = item?["base64"]?.GetValue<string>();
             var mediaType = item?["mediaType"]?.GetValue<string>();
             if (string.IsNullOrEmpty(base64) || string.IsNullOrEmpty(mediaType)) continue;
@@ -828,6 +848,14 @@ public class AideLitePaneWebViewModel : WebViewDockablePaneViewModel
                 DiagLog($"ParseImageAttachments: skipping unsupported media type '{mediaType}'");
                 continue;
             }
+
+            totalBase64Bytes += base64.Length;
+            if (totalBase64Bytes > maxTotalBase64Bytes)
+            {
+                DiagLog($"ParseImageAttachments: total base64 size exceeds {maxTotalBase64Bytes / (1024 * 1024)}MB, skipping remaining");
+                break;
+            }
+
             result.Add(new ImageAttachment(base64, mediaType));
         }
         return result;
