@@ -252,6 +252,17 @@
         });
     });
 
+    // --- Document reference click handler ---
+    d.chatArea.addEventListener('click', function (e) {
+        var target = e.target;
+        if (!target.classList.contains('doc-ref')) return;
+        var qualifiedName = target.getAttribute('data-qualified-name');
+        var docType = target.getAttribute('data-doc-type');
+        if (qualifiedName) {
+            AIDE.sendToBackend('open_document', { qualifiedName: qualifiedName, docType: docType || '' });
+        }
+    });
+
     // --- Setup attachment handlers ---
     AIDE.setupDragDrop(d.inputArea, d.chatInput);
     AIDE.setupFilePicker(d.attachBtn, d.attachFileInput);

@@ -1269,6 +1269,75 @@ body.dark .file-chip-sent.file-chip-data {
     color: #5b21b6;
 }
 
+/* === Clickable Document References in AI Responses === */
+.doc-ref {
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12px;
+    border-bottom: 1px dashed currentColor;
+    padding: 0 2px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.doc-ref-entity {
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.06);
+}
+.doc-ref-entity:hover {
+    background: rgba(124, 58, 237, 0.15);
+}
+.doc-ref-microflow {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.06);
+}
+.doc-ref-microflow:hover {
+    background: rgba(37, 99, 235, 0.15);
+}
+.doc-ref-page {
+    color: #059669;
+    background: rgba(5, 150, 105, 0.06);
+}
+.doc-ref-page:hover {
+    background: rgba(5, 150, 105, 0.15);
+}
+.doc-ref-enumeration {
+    color: #d97706;
+    background: rgba(217, 119, 6, 0.06);
+}
+.doc-ref-enumeration:hover {
+    background: rgba(217, 119, 6, 0.15);
+}
+
+/* Dark mode document references */
+body.dark .doc-ref-entity {
+    color: #c4b5fd;
+    background: rgba(124, 58, 237, 0.15);
+}
+body.dark .doc-ref-entity:hover {
+    background: rgba(124, 58, 237, 0.25);
+}
+body.dark .doc-ref-microflow {
+    color: #93c5fd;
+    background: rgba(37, 99, 235, 0.15);
+}
+body.dark .doc-ref-microflow:hover {
+    background: rgba(37, 99, 235, 0.25);
+}
+body.dark .doc-ref-page {
+    color: #6ee7b7;
+    background: rgba(5, 150, 105, 0.15);
+}
+body.dark .doc-ref-page:hover {
+    background: rgba(5, 150, 105, 0.25);
+}
+body.dark .doc-ref-enumeration {
+    color: #fcd34d;
+    background: rgba(217, 119, 6, 0.15);
+}
+body.dark .doc-ref-enumeration:hover {
+    background: rgba(217, 119, 6, 0.25);
+}
+
 /* === Data Disclosure === */
 .data-disclosure {
     font-size: 10px;

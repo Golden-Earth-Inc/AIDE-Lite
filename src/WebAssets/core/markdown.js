@@ -111,7 +111,65 @@
         // Line breaks
         html = html.replace(/\n/g, '<br>');
 
+        html = AIDE.linkifyDocumentReferences(html);
+
         return html;
+    };
+
+    AIDE.linkifyDocumentReferences = function (html) {
+        var index = AIDE.state.get('documentIndex');
+        var shortIndex = AIDE.state.get('documentShortIndex');
+        if ((!index || Object.keys(index).length === 0) &&
+            (!shortIndex || Object.keys(shortIndex).length === 0)) return html;
+
+        // Split by HTML tags to only process text nodes
+        var parts = html.split(/(<[^>]+>)/);
+        var insideCode = 0;
+        var insideAnchor = 0;
+        // Match qualified names (Module.Name) OR standalone identifiers (4+ chars, uppercase start)
+        var namePattern = /[A-Z][a-zA-Z0-9_]*\.[A-Z][a-zA-Z0-9_]*|[A-Z][a-zA-Z0-9_]{3,}/g;
+
+        for (var i = 0; i < parts.length; i++) {
+            var part = parts[i];
+
+            // Track tag nesting
+            if (part.charAt(0) === '<') {
+                var lower = part.toLowerCase();
+                if (lower.indexOf('<code') === 0 || lower.indexOf('<pre') === 0) insideCode++;
+                else if (lower.indexOf('</code') === 0 || lower.indexOf('</pre') === 0) insideCode--;
+                else if (lower.indexOf('<a ') === 0 || lower.indexOf('<a>') === 0) insideAnchor++;
+                else if (lower.indexOf('</a') === 0) insideAnchor--;
+                continue;
+            }
+
+            // Skip text inside code or anchor tags
+            if (insideCode > 0 || insideAnchor > 0) continue;
+
+            parts[i] = part.replace(namePattern, function (match) {
+                // Try full qualified name first
+                var docType = index ? index[match] : null;
+                var qualifiedName = match;
+
+                // If not found, try short name lookup
+                if (!docType && shortIndex) {
+                    var entry = shortIndex[match];
+                    if (entry) {
+                        docType = entry.type;
+                        qualifiedName = entry.qualifiedName;
+                    }
+                }
+
+                if (!docType) return match;
+                var safeType = AIDE.safeElementType(docType);
+                return '<span class="doc-ref doc-ref-' + safeType +
+                    '" data-qualified-name="' + AIDE.escapeHtml(qualifiedName) +
+                    '" data-doc-type="' + safeType +
+                    '" title="Open ' + AIDE.escapeHtml(qualifiedName) + ' (' + safeType + ')">' +
+                    match + '</span>';
+            });
+        }
+
+        return parts.join('');
     };
 
     AIDE.inlineStylesForCopy = function (clone) {
@@ -152,6 +210,9 @@
         });
         clone.querySelectorAll('a').forEach(function (el) {
             el.style.cssText = 'color:#7c3aed;text-decoration:underline;';
+        });
+        clone.querySelectorAll('.doc-ref').forEach(function (el) {
+            el.style.cssText = 'font-family:"Cascadia Code","Consolas",monospace;font-size:12px;';
         });
     };
 
