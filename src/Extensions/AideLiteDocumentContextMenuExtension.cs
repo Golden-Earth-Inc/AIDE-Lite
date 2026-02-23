@@ -8,8 +8,6 @@ using AideLite.Services;
 using Mendix.StudioPro.ExtensionsAPI.Model.Constants;
 using Mendix.StudioPro.ExtensionsAPI.Model.Enumerations;
 using Mendix.StudioPro.ExtensionsAPI.Model.JavaActions;
-using Mendix.StudioPro.ExtensionsAPI.Model.Microflows;
-using Mendix.StudioPro.ExtensionsAPI.Model.Pages;
 using Mendix.StudioPro.ExtensionsAPI.Model.Projects;
 using Mendix.StudioPro.ExtensionsAPI.Services;
 using Mendix.StudioPro.ExtensionsAPI.UI.Menu;
@@ -61,15 +59,8 @@ public class AideLiteDocumentContextMenuExtension : ContextMenuExtension<IDocume
             });
     }
 
-    private static string DetectElementType(IDocument document) => document switch
-    {
-        IMicroflow => "microflow",
-        IPage => "page",
-        IConstant => "constant",
-        IEnumeration => "enumeration",
-        IJavaAction => "java_action",
-        _ => "document"
-    };
+    private static string DetectElementType(IDocument document)
+        => DocumentTypeDetector.Detect(document);
 
     private string ResolveQualifiedName(IDocument document)
     {

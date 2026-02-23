@@ -8,7 +8,14 @@
     var state = AIDE.state;
 
     AIDE.safeElementType = function (type) {
-        var allowed = { 'microflow': true, 'page': true, 'entity': true, 'constant': true, 'enumeration': true, 'java_action': true, 'document': true };
+        var allowed = {
+            'microflow': true, 'page': true, 'entity': true, 'constant': true,
+            'enumeration': true, 'java_action': true, 'document': true,
+            'nanoflow': true, 'scheduled_event': true, 'rest_service': true,
+            'odata_service': true, 'import_mapping': true, 'export_mapping': true,
+            'snippet': true, 'layout': true, 'rule': true,
+            'building_block': true, 'document_template': true
+        };
         return allowed[type] ? type : 'document';
     };
 
@@ -126,7 +133,14 @@
             'microflow': '\u2699',
             'page': '\uD83D\uDCC4',
             'entity': '\uD83D\uDCE6',
-            'document': '\uD83D\uDCC1'
+            'document': '\uD83D\uDCC1',
+            'nanoflow': '\u26A1',
+            'scheduled_event': '\u23F0',
+            'rest_service': '\uD83C\uDF10',
+            'snippet': '\u2702',
+            'rule': '\u2696',
+            'layout': '\uD83D\uDCC4',
+            'building_block': '\uD83D\uDCC4'
         };
         AIDE.dom.activeDocIcon.textContent = iconMap[doc.type] || iconMap['document'];
         AIDE.dom.activeDocText.textContent = doc.qualifiedName;
@@ -149,10 +163,9 @@
                     var shortName = doc.qualifiedName.substring(dotIdx + 1);
                     if (shortIndex[shortName] === undefined) {
                         shortIndex[shortName] = { qualifiedName: doc.qualifiedName, type: doc.type };
-                    } else if (shortIndex[shortName] !== null) {
-                        // Same short name in multiple modules — mark ambiguous
-                        shortIndex[shortName] = null;
                     }
+                    // Keep the first entry for ambiguous names — still linkify
+                    // (tooltip shows qualified name so users can see which module it points to)
                 }
             }
             state.set('documentIndex', index);

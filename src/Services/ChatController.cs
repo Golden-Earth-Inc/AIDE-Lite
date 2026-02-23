@@ -14,6 +14,7 @@ using AideLite.ModelWriters;
 using AideLite.Tools;
 using Mendix.StudioPro.ExtensionsAPI.Model;
 using Mendix.StudioPro.ExtensionsAPI.Model.Projects;
+using Mendix.StudioPro.ExtensionsAPI.Model.UntypedModel;
 using Mendix.StudioPro.ExtensionsAPI.Services;
 using Mendix.StudioPro.ExtensionsAPI.UI.Services;
 using Mendix.StudioPro.ExtensionsAPI.UI.WebView;
@@ -307,6 +308,8 @@ public class ChatController
             var microflowGenerator = new MicroflowGenerator(
                 model, _microflowService, _activitiesService, _expressionService, _domainModelService, transactionManager, _logService);
 
+            var genericDocReader = new GenericDocumentReader(model, _untypedModelAccessService, _logService);
+
             _toolRegistry = new ToolRegistry();
             _toolRegistry.Register(new GetModulesTool(_contextExtractor));
             _toolRegistry.Register(new GetEntitiesTool(_contextExtractor, domainModelReader));
@@ -316,6 +319,7 @@ public class ChatController
             _toolRegistry.Register(new GetAssociationsTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new GetEnumerationsTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new GetPagesTool(_contextExtractor, pageReader));
+            _toolRegistry.Register(new GetDocumentDetailsTool(_contextExtractor, genericDocReader));
             _toolRegistry.Register(new SearchModelTool(model, _contextExtractor));
             _toolRegistry.Register(new ValidateOqlQueryTool(_contextExtractor, domainModelReader));
             _toolRegistry.Register(new CreateMicroflowTool(_contextExtractor, microflowGenerator));
@@ -679,6 +683,7 @@ public class ChatController
                     return;
                 }
 
+                // Try the typed API first (works for microflows, pages, constants, etc.)
                 foreach (var doc in MicroflowReader.GetAllDocumentsRecursive<IDocument>(module))
                 {
                     if (doc.Name == docName)
@@ -699,6 +704,21 @@ public class ChatController
                         return;
                     }
                 }
+
+                // Fallback: IProject.GetModuleDocuments (returns some types the recursive walk misses)
+                if (TryOpenViaProjectApi(qualifiedName, module, docName))
+                    return;
+
+                // Nanoflows and some other document types exist in the untyped model but
+                // their runtime proxy only implements IModelUnit (not IAbstractUnit), so
+                // TryOpenEditor cannot open them. Add as context chip instead.
+                if (IsUntypedModelDocument(qualifiedName))
+                {
+                    DiagLog($"HandleOpenDocument: '{qualifiedName}' cannot be opened (API limitation), adding as context reference");
+                    SendToWebView("document_referenced", new { type = docType, qualifiedName });
+                    return;
+                }
+
                 break;
             }
             DiagLog($"HandleOpenDocument: document '{qualifiedName}' not found in model");
@@ -707,6 +727,59 @@ public class ChatController
         {
             DiagLog($"HandleOpenDocument: error opening '{qualifiedName}': {ex.Message}");
         }
+    }
+
+    private bool TryOpenViaProjectApi(string qualifiedName, IModule module, string docName)
+    {
+        try
+        {
+            var model = Model;
+            if (model == null) return false;
+
+            foreach (var (doc, docType) in model.Root.GetModuleDocuments(module))
+            {
+                if (string.Equals(doc.Name, docName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var opened = _dockingService.TryOpenEditor(doc);
+                    DiagLog($"HandleOpenDocument: project API TryOpenEditor('{qualifiedName}', type={docType.Name}) = {opened}");
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagLog($"HandleOpenDocument: project API error for '{qualifiedName}': {ex.Message}");
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Check whether a document exists in the untyped model (nanoflows, scheduled events, etc.
+    /// that the typed API doesn't expose as IDocument).
+    /// </summary>
+    private bool IsUntypedModelDocument(string qualifiedName)
+    {
+        try
+        {
+            var model = Model;
+            if (model == null) return false;
+
+            var untypedRoot = _untypedModelAccessService.GetUntypedModel(model);
+            foreach (var metamodelType in GenericDocumentReader.TypeToMetamodel.Values)
+            {
+                try
+                {
+                    foreach (var unit in untypedRoot.GetUnitsOfType(metamodelType))
+                    {
+                        if (unit.QualifiedName == qualifiedName)
+                            return true;
+                    }
+                }
+                catch { /* metamodel type may not exist in this Studio Pro version */ }
+            }
+        }
+        catch { }
+        return false;
     }
 
     private void HandleConsentAccepted()
@@ -997,6 +1070,10 @@ public class ChatController
                 "enumeration" => "use get_enumerations to inspect it",
                 "constant" => "use search_model to find constant details",
                 "java_action" => "use search_model to find Java action details",
+                "nanoflow" or "scheduled_event" or "rest_service" or "odata_service"
+                    or "import_mapping" or "export_mapping" or "snippet" or "layout"
+                    or "rule" or "building_block" or "document_template"
+                    => "use get_document_details to inspect it",
                 _ => "use search_model to find more information"
             };
             lines.Add($"[The user is asking about: @{qname} ({type}) — {toolHint}]");
@@ -1025,6 +1102,10 @@ public class ChatController
             "enumeration" => "use get_enumerations to inspect it",
             "constant" => "use search_model to find constant details",
             "java_action" => "use search_model to find Java action details",
+            "nanoflow" or "scheduled_event" or "rest_service" or "odata_service"
+                or "import_mapping" or "export_mapping" or "snippet" or "layout"
+                or "rule" or "building_block" or "document_template"
+                => "use get_document_details to inspect it",
             _ => "use search_model to find more information"
         };
 
@@ -1149,16 +1230,45 @@ public class ChatController
         var documentIndex = new List<object>();
         if (_cachedContext == null) return documentIndex;
 
+        var indexed = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var module in _cachedContext.Modules)
         {
             foreach (var e in module.Entities)
-                documentIndex.Add(new { qualifiedName = $"{module.Name}.{e.Name}", type = "entity" });
+            {
+                var qn = $"{module.Name}.{e.Name}";
+                documentIndex.Add(new { qualifiedName = qn, type = "entity" });
+                indexed.Add(qn);
+            }
             foreach (var mf in module.Microflows)
-                documentIndex.Add(new { qualifiedName = $"{module.Name}.{mf.Name}", type = "microflow" });
+            {
+                var qn = $"{module.Name}.{mf.Name}";
+                documentIndex.Add(new { qualifiedName = qn, type = "microflow" });
+                indexed.Add(qn);
+            }
             foreach (var p in module.Pages)
-                documentIndex.Add(new { qualifiedName = $"{module.Name}.{p.Name}", type = "page" });
+            {
+                var qn = $"{module.Name}.{p.Name}";
+                documentIndex.Add(new { qualifiedName = qn, type = "page" });
+                indexed.Add(qn);
+            }
             foreach (var en in module.Enumerations)
-                documentIndex.Add(new { qualifiedName = $"{module.Name}.{en.Name}", type = "enumeration" });
+            {
+                var qn = $"{module.Name}.{en.Name}";
+                documentIndex.Add(new { qualifiedName = qn, type = "enumeration" });
+                indexed.Add(qn);
+            }
+
+            // Index other document types (nanoflows, scheduled events, REST services, etc.)
+            if (module.OtherDocuments.Count > 0)
+            {
+                foreach (var doc in module.OtherDocuments)
+                {
+                    var qn = $"{module.Name}.{doc.Name}";
+                    if (indexed.Add(qn))
+                        documentIndex.Add(new { qualifiedName = qn, type = doc.Type });
+                }
+            }
         }
         return documentIndex;
     }

@@ -4,7 +4,10 @@
 // App context extraction — builds a full DTO snapshot of the Mendix app model
 // ============================================================================
 using AideLite.Models.DTOs;
+using AideLite.Services;
 using Mendix.StudioPro.ExtensionsAPI.Model;
+using Mendix.StudioPro.ExtensionsAPI.Model.Projects;
+using Mendix.StudioPro.ExtensionsAPI.Model.UntypedModel;
 using Mendix.StudioPro.ExtensionsAPI.Services;
 
 namespace AideLite.ModelReaders;
@@ -15,6 +18,8 @@ public class AppContextExtractor
     private readonly DomainModelReader _domainModelReader;
     private readonly MicroflowReader _microflowReader;
     private readonly PageReader _pageReader;
+    private readonly IUntypedModelAccessService _untypedService;
+    private readonly ILogService _logService;
 
     public AppContextExtractor(
         IModel model,
@@ -24,6 +29,8 @@ public class AppContextExtractor
         ILogService logService)
     {
         _model = model;
+        _untypedService = untypedModelAccessService;
+        _logService = logService;
         _domainModelReader = new DomainModelReader(model, domainModelService);
         _microflowReader = new MicroflowReader(model, microflowService, untypedModelAccessService, logService);
         _pageReader = new PageReader(model);
@@ -52,7 +59,8 @@ public class AppContextExtractor
                 Associations = _domainModelReader.GetAssociationSummaries(module),
                 Microflows = _microflowReader.GetMicroflowSummaries(module),
                 Pages = _pageReader.GetPageSummaries(module),
-                Enumerations = _domainModelReader.GetEnumerationSummaries(module)
+                Enumerations = _domainModelReader.GetEnumerationSummaries(module),
+                OtherDocuments = GetOtherDocumentSummaries(module)
             };
 
             context.Modules.Add(moduleSummary);
@@ -109,6 +117,8 @@ public class AppContextExtractor
                 moduleSummary.Microflows = _microflowReader.GetEnrichedMicroflowSummaries(module);
             }
 
+            moduleSummary.OtherDocuments = GetOtherDocumentSummaries(module);
+
             context.Modules.Add(moduleSummary);
         }
 
@@ -118,9 +128,63 @@ public class AppContextExtractor
     /// <summary>
     /// Find a module by name.
     /// </summary>
-    public Mendix.StudioPro.ExtensionsAPI.Model.Projects.IModule? FindModule(string moduleName)
+    public IModule? FindModule(string moduleName)
     {
         return _model.Root.GetModules().FirstOrDefault(m =>
             string.Equals(m.Name, moduleName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Metamodel types to enumerate via the Untyped Model API.
+    /// The typed API (GetDocuments) doesn't return nanoflows, scheduled events, etc.
+    /// </summary>
+    private static readonly (string MetamodelType, string AideType)[] UntypedDocumentTypes =
+    {
+        ("Microflows$Nanoflow", "nanoflow"),
+        ("ScheduledEvents$ScheduledEvent", "scheduled_event"),
+        ("Rest$PublishedRestService", "rest_service"),
+        ("Rest$PublishedODataService", "odata_service"),
+        ("Mappings$ImportMapping", "import_mapping"),
+        ("Mappings$ExportMapping", "export_mapping"),
+        ("Pages$Snippet", "snippet"),
+        ("Pages$Layout", "layout"),
+        ("Microflows$Rule", "rule"),
+        ("Pages$BuildingBlock", "building_block"),
+        ("DocumentTemplates$DocumentTemplate", "document_template"),
+    };
+
+    private List<DocumentSummaryDto> GetOtherDocumentSummaries(IModule module)
+    {
+        var results = new List<DocumentSummaryDto>();
+        try
+        {
+            var untypedRoot = _untypedService.GetUntypedModel(_model);
+            var modulePrefix = module.Name + ".";
+
+            foreach (var (metamodelType, aideType) in UntypedDocumentTypes)
+            {
+                try
+                {
+                    foreach (var unit in untypedRoot.GetUnitsOfType(metamodelType))
+                    {
+                        var qn = unit.QualifiedName;
+                        if (qn != null && qn.StartsWith(modulePrefix, StringComparison.Ordinal))
+                        {
+                            var name = qn.Substring(modulePrefix.Length);
+                            results.Add(new DocumentSummaryDto { Name = name, Type = aideType });
+                        }
+                    }
+                }
+                catch
+                {
+                    // Metamodel type may not exist in this Studio Pro version — skip silently
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logService.Info($"AIDE Lite: Error enumerating other documents in '{module.Name}': {ex.Message}");
+        }
+        return results;
     }
 }

@@ -163,6 +163,12 @@ public class AideLitePaneExtension : DockablePaneExtension
             "constant" or "constants$constant" => "constant",
             "enumeration" or "enumerations$enumeration" => "enumeration",
             "javaaction" or "javaactions$javaaction" => "java_action",
+            "nanoflow" or "microflows$nanoflow" => "nanoflow",
+            "scheduledevent" or "scheduledevents$scheduledevent" => "scheduled_event",
+            "publishedrestservice" or "rest$publishedrestservice" => "rest_service",
+            "snippet" or "pages$snippet" => "snippet",
+            "layout" or "pages$layout" => "layout",
+            "rule" or "microflows$rule" => "rule",
             _ => e.DocumentType ?? "document"
         };
 

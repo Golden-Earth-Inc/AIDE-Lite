@@ -88,6 +88,9 @@
             case 'set_view_mode':
                 AIDE.handleSetViewMode(data);
                 break;
+            case 'toast':
+                AIDE.showToast(data.message);
+                break;
         }
     };
 
