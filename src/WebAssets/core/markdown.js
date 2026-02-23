@@ -83,11 +83,11 @@
             var row = cells.map(function (c) { return '<' + tag + '>' + c + '</' + tag + '>'; }).join('');
             return '<tr>' + row + '</tr>';
         });
+        html = html.replace(/\n?<!-- table separator -->\n?/g, '');
         html = html.replace(/((<tr>[\s\S]*?<\/tr>\s*)+)/g, function () {
             tableIsHeader = true;
             return '<table>' + arguments[0] + '</table>';
         });
-        html = html.replace(/<!-- table separator -->\s*/g, '');
 
         // Paragraphs
         html = html.replace(/\n\n/g, '</p><p>');
@@ -110,6 +110,10 @@
 
         // Line breaks
         html = html.replace(/\n/g, '<br>');
+
+        // Clean up stray <br> tags adjacent to block-level elements
+        html = html.replace(/(<br>\s*)+(<\/?(?:table|tr|th|td|p|h[1-3]|ul|ol|li|blockquote|div)[\s>\/])/gi, '$2');
+        html = html.replace(/(<\/(?:table|tr|th|td|p|h[1-3]|ul|ol|li|blockquote|div)>)(\s*<br>)+/gi, '$1');
 
         html = AIDE.linkifyDocumentReferences(html);
 
@@ -216,13 +220,40 @@
         });
     };
 
+    AIDE.copyToClipboard = function (text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text).catch(function () {
+                return AIDE.copyFallback(text);
+            });
+        }
+        return AIDE.copyFallback(text);
+    };
+
+    AIDE.copyFallback = function (text) {
+        return new Promise(function (resolve, reject) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy') ? resolve() : reject();
+            } catch (e) {
+                reject(e);
+            } finally {
+                document.body.removeChild(ta);
+            }
+        });
+    };
+
     AIDE.copyCodeBlock = function (btn) {
         var wrapper = btn.closest('.code-block-wrapper');
         if (!wrapper) return;
         var code = wrapper.querySelector('code');
         if (!code) return;
         var text = code.textContent;
-        navigator.clipboard.writeText(text).then(function () {
+        AIDE.copyToClipboard(text).then(function () {
             btn.textContent = '\u2713';
             setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
         }).catch(function () {
@@ -245,12 +276,17 @@
             AIDE.inlineStylesForCopy(clone);
 
             var styledHtml = '<div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5;color:#1a1a2e;">' + clone.innerHTML + '</div>';
-            var htmlBlob = new Blob([styledHtml], { type: 'text/html' });
-            var textBlob = new Blob([md], { type: 'text/plain' });
 
-            navigator.clipboard.write([
-                new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
-            ]).then(function () {
+            var richCopy = (typeof ClipboardItem !== 'undefined' && navigator.clipboard && navigator.clipboard.write)
+                ? navigator.clipboard.write([
+                    new ClipboardItem({
+                        'text/html': new Blob([styledHtml], { type: 'text/html' }),
+                        'text/plain': new Blob([md], { type: 'text/plain' })
+                    })
+                ]).catch(function () { return AIDE.copyToClipboard(md); })
+                : AIDE.copyToClipboard(md);
+
+            richCopy.then(function () {
                 btn.textContent = '\u2713';
                 setTimeout(function () { btn.innerHTML = '&#x2398;'; }, 1500);
             }).catch(function () {
